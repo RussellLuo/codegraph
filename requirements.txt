@@ -1,0 +1,4 @@
+tree-sitter==0.24.0
+tree-sitter-python==0.23.6
+kuzu==0.10.0
+mcp[cli]==1.8.0
