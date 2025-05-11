@@ -64,8 +64,8 @@ class Node:
                     "name": self.name,
                     "type": self.type.value,
                     "code": self.code,
-                    "start_line": self.start.line + 1,  # 0-indexed to 1-indexed
-                    "end_line": self.end.line + 1,  # 0-indexed to 1-indexed
+                    "start_line": self.start.line,
+                    "end_line": self.end.line,
                 }
             case _:
                 raise ValueError(f"Unsupport node type: {self.type}")
@@ -159,7 +159,7 @@ class Database:
                 shutil.rmtree(self.tmp_data)
             os.makedirs(self.tmp_data, exist_ok=True)
 
-    def get_node(self, name: str) -> dict | None:
+    def get_node(self, name: str) -> Node | None:
         result = self.execute(
             """
             MATCH (a)
@@ -170,7 +170,15 @@ class Database:
         )
         if not result:
             return None
-        return result[0][0]
+
+        data = result[0][0]
+        return Node(
+            type=NodeType(data["type"]),
+            name=data["name"],
+            code=data.get("code", ""),
+            start=Point(line=data.get("start_line", 0), column=0),  # no column info
+            end=Point(line=data.get("end_line", 0), column=0),  # no column info
+        )
 
     def has_node(self, name: str) -> bool:
         result = self.execute(

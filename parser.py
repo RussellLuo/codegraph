@@ -4,7 +4,7 @@ import dataclasses
 import fnmatch
 import os
 
-from tree_sitter import Language, Parser, Tree, Node
+import tree_sitter
 import tree_sitter_python
 
 from database import (
@@ -16,8 +16,8 @@ from database import (
     Relationship,
 )
 
-PY_LANGUAGE = Language(tree_sitter_python.language())
-parser = Parser(PY_LANGUAGE)
+PY_LANGUAGE = tree_sitter.Language(tree_sitter_python.language())
+parser = tree_sitter.Parser(PY_LANGUAGE)
 
 
 @dataclasses.dataclass
@@ -35,7 +35,7 @@ class Inherit:
 
 class Parser:
     def __init__(self, db: Database, repo_path: str, module_search_paths: list[str]):
-        self.db = db
+        self.db: Database = db
         self.repo_path: str = repo_path
         self.module_search_paths: list[str] = module_search_paths
 
@@ -110,7 +110,7 @@ class Parser:
                                     )
                                 )
 
-    def parse_import(self, file_node, child) -> list[Node]:
+    def parse_import(self, file_node: Node, child: tree_sitter.Node) -> list[Node]:
         # 处理普通import语句(如import os, sys)
         imps: list[Node] = []
 
@@ -131,7 +131,7 @@ class Parser:
 
         return imps
 
-    def parse_from_import(self, file_node, child) -> list[Node]:
+    def parse_from_import(self, file_node: Node, child: tree_sitter.Node) -> list[Node]:
         # 处理from...import语句(如from collections import defaultdict)
         imps: list[Node] = []
 
@@ -155,7 +155,7 @@ class Parser:
 
         return imps
 
-    def parse_variable(self, file_node, child) -> Node | None:
+    def parse_variable(self, file_node: Node, child: tree_sitter.Node) -> Node | None:
         assignment = child.children[0] if child.children else None
         if assignment and assignment.type == "assignment":
             identifier = assignment.child_by_field_name("left")
@@ -163,18 +163,12 @@ class Parser:
             return Node(
                 type=NodeType.VARIABLE,
                 name=f"{file_node.name}:{var_name}",
-                start=Point(
-                    line=identifier.start_point[0],
-                    column=identifier.start_point[1],
-                ),
-                end=Point(
-                    line=identifier.end_point[0],
-                    column=identifier.end_point[1],
-                ),
+                start=self._create_point(identifier.start_point),
+                end=self._create_point(identifier.end_point),
             )
         return None
 
-    def parse_function(self, file_node, child) -> Node:
+    def parse_function(self, file_node: Node, child: tree_sitter.Node) -> Node:
         name_node = child.child_by_field_name("name")
         func_name = name_node.text.decode().strip()
         code = child.text.decode()
@@ -182,11 +176,11 @@ class Parser:
             type=NodeType.FUNCTION,
             name=f"{file_node.name}:{func_name}",
             code=code,
-            start=Point(line=child.start_point[0], column=child.start_point[1]),
-            end=Point(line=child.end_point[0], column=child.end_point[1]),
+            start=self._create_point(child.start_point),
+            end=self._create_point(child.end_point),
         )
 
-    def parse_class(self, file_node, child) -> Node:
+    def parse_class(self, file_node: Node, child: tree_sitter.Node) -> Node:
         name_node = child.child_by_field_name("name")
         class_name = name_node.text.decode().strip()
         code = child.text.decode()
@@ -194,8 +188,14 @@ class Parser:
             type=NodeType.CLASS,
             name=f"{file_node.name}:{class_name}",
             code=code,
-            start=Point(line=child.start_point[0], column=child.start_point[1]),
-            end=Point(line=child.end_point[0], column=child.end_point[1]),
+            start=self._create_point(child.start_point),
+            end=self._create_point(child.end_point),
+        )
+
+    def _create_point(self, ts_point: tree_sitter.Point) -> Point:
+        return Point(
+            line=ts_point[0] + 1,  # 0-based to 1-based line number
+            column=ts_point[1] + 1,  # 0-based to 1-based column number
         )
 
     def relative_to_absolute(self, current_file_path: str, module_name: str) -> str:
@@ -483,8 +483,6 @@ class Parser:
         Resolve the superclass name to the actual name of the superclass node.
         """
         name = inherit.superclass_name
-        #if name == "ChatAgent":
-        #    import pdb; pdb.set_trace()
         if "." not in name:
             # cases where superclass is defined inside the file (module) itself
             node_name = f"{file_node.name}:{name}"
@@ -546,12 +544,9 @@ class Parser:
         imports_relationships: list[Relationship] = []
         for file_node, imps in self.file_imports.items():
             for imp in imps:
-                imp_node_dict = self.db.get_node(imp.node_name)
-                if not imp_node_dict:
+                imp_node = self.db.get_node(imp.node_name)
+                if not imp_node:
                     continue
-                imp_node = Node(
-                    name=imp.node_name, type=NodeType(imp_node_dict["type"])
-                )
                 imports_relationships.append(
                     Relationship(
                         type=EdgeType.IMPORTS,
@@ -570,13 +565,16 @@ class Parser:
                 superclass_node_name = self.resolve_superclass_name(inherit, file_node)
                 if not superclass_node_name:
                     continue
-                superclass_node_dict = self.db.get_node(superclass_node_name)
-                if not superclass_node_dict:
-                    continue
-                superclass_node = Node(
-                    name=superclass_node_name,
-                    type=NodeType(superclass_node_dict["type"]),
-                )
+
+                superclass_node = self.db.get_node(superclass_node_name)
+                if not superclass_node:
+                    # The superclass is from an imported external library, create an UNPARSED node.
+                    superclass_node = Node(
+                        name=superclass_node_name,
+                        type=NodeType.UNPARSED,
+                    )
+                    self.db.upsert_node(superclass_node)
+
                 inherits_relationships.append(
                     Relationship(
                         type=EdgeType.INHERITS,
