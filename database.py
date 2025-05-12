@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections import defaultdict
 import dataclasses
 import enum
@@ -38,11 +40,38 @@ class Node:
     start: Point | None = None
     end: Point | None = None
 
+    @classmethod
+    def from_dict(cls, data: dict) -> Node:
+        return Node(
+            type=NodeType(data["type"]),
+            name=data["name"],
+            code=data.get("code", ""),
+            start=Point(line=data.get("start_line", 0), column=0),  # no column info
+            end=Point(line=data.get("end_line", 0), column=0),  # no column info
+        )
+
     def __hash__(self):
         return hash((self.type, self.name))
 
     def __eq__(self, other: None):
         return self.type == other.type and self.name == other.name
+
+    @property
+    def short_names(self) -> list[str]:
+        def make_names(name: str) -> list[str]:
+            lower = name.lower()
+            if lower != name:
+                return [name, lower]
+            return [name]
+
+        if ":" in self.name:
+            # "src/a.py:A" => A, a
+            attribute_name = self.name.rsplit(":", 1)[-1]
+            return make_names(attribute_name)
+        else:
+            # "src/a.py" => a
+            file_name = self.name.rsplit("/", 1)[-1]
+            return make_names(file_name)
 
     def to_dict(self) -> dict:
         match self.type:
@@ -50,11 +79,13 @@ class Node:
                 return {
                     "name": self.name,
                     "type": self.type.value,
+                    "short_names": self.short_names,
                 }
             case NodeType.FILE:
                 return {
                     "name": self.name,
                     "type": self.type.value,
+                    "short_names": self.short_names,
                     "code": self.code,
                 }
             case NodeType.VARIABLE:
@@ -63,6 +94,7 @@ class Node:
                 return {
                     "name": self.name,
                     "type": self.type.value,
+                    "short_names": self.short_names,
                     "code": self.code,
                     "start_line": self.start.line,
                     "end_line": self.end.line,
@@ -172,13 +204,7 @@ class Database:
             return None
 
         data = result[0][0]
-        return Node(
-            type=NodeType(data["type"]),
-            name=data["name"],
-            code=data.get("code", ""),
-            start=Point(line=data.get("start_line", 0), column=0),  # no column info
-            end=Point(line=data.get("end_line", 0), column=0),  # no column info
-        )
+        return Node.from_dict(data)
 
     def has_node(self, name: str) -> bool:
         result = self.execute(

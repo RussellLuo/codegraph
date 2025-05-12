@@ -4,14 +4,76 @@ import json
 from mcp.server.fastmcp import FastMCP
 import kuzu
 
-from database import Database
+from database import Database, Node
 
 mcp = FastMCP("Demo")
 db = Database("./graph/db")
 
 
 @mcp.tool()
-def explore_tree_structure(
+def search_entities(search_terms: list[str]) -> str:
+    """Searches the codebase to retrieve relevant code entities based on given query terms.
+
+    Note:
+    1. If `search_terms` are provided, it searches for code snippets based on each term:
+        - If a term is formatted as 'file_path:QualifiedName' (e.g., 'src/helpers/math_helpers.py:MathUtils.calculate_sum') ,
+          or just 'file_path', the corresponding complete code is retrieved or file content is retrieved.
+        - If a term matches a file, class, or function name, matched entities are retrieved.
+
+    Args:
+        search_terms (Optional[List[str]]): A list of names, keywords, or code snippets to search for within the codebase.
+            Terms can be formatted as 'file_path:QualifiedName' to search for a specific module or entity within a file
+            (e.g., 'src/helpers/math_helpers.py:MathUtils.calculate_sum') or as 'file_path' to retrieve the complete content
+            of a file. This can also include potential function names, class names, or general code fragments.
+
+    Returns:
+        str: The search results, which may include code snippets, matching entities, or complete file content.
+
+
+    Example Usage:
+        # Search for the full content of a specific file
+        result = search_entities(search_terms=['src/my_file.py'])
+
+        # Search for a specific class
+        result = search_entities(search_terms=['src/my_file.py:MyClass'])
+
+        # Search for a keyword in the style of an unqualified name
+        result = search_entities(search_terms=["MyClass"]
+    """
+    nodes: list[Node] = []
+    for term in search_terms:
+        term = term.strip()
+        term_node = db.get_node(term)
+        if term_node:
+            nodes.append(term_node)
+
+        result = db.execute(
+            """
+            MATCH (a)
+            WHERE $term IN a.short_names
+            RETURN a;
+            """,
+            parameters={"term": term},
+        )
+        for r in result:
+            node = Node.from_dict(r[0])
+            nodes.append(node)
+
+    # Return the result as a JSON string
+    return json.dumps(
+        [
+            {
+                "name": node.name,
+                "type": node.type,
+            }
+            for node in nodes
+        ],
+        indent=2,
+    )
+
+
+@mcp.tool()
+def traverse_graph(
     start_entities: list[str],
     direction: str = "downstream",
     traversal_depth: int = 1,
@@ -27,7 +89,7 @@ def explore_tree_structure(
     Example Usage:
     1. Exploring Outward Dependencies:
         ```
-        explore_tree_structure(
+        traverse_graph(
             start_entities=['src/module_a.py:ClassA'],
             direction='downstream',
             traversal_depth=2,
@@ -39,7 +101,7 @@ def explore_tree_structure(
 
     2. Exploring Inward Dependencies:
         ```
-        explore_tree_structure(
+        traverse_graph(
             start_entities=['src/module_b.py:FunctionY'],
             direction='upstream',
             traversal_depth=-1
@@ -65,7 +127,6 @@ def explore_tree_structure(
         - 'downstream': Traversal to explore dependencies that the specified entities rely on (how they depend on others).
         - 'upstream': Traversal to explore the effects or interactions of the specified entities on others
           (how others depend on them).
-        - 'both': Traversal in both directions.
         Default is 'downstream'.
 
     traversal_depth : int, optional
