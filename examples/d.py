@@ -1,9 +1,11 @@
 class D1:
-    pass
+    def talk(self):
+        pass
 
 
 class D2:
-    pass
+    def sing(self):
+        pass
 
 
 class D(D1, D2):

@@ -41,8 +41,9 @@ CREATE NODE TABLE IF NOT EXISTS Function (
 CREATE REL TABLE IF NOT EXISTS CONTAINS (
     From Directory To Directory,
     From Directory To File,
-    From File To Class,
     From File To Function,
+    From File To Class,
+    From Class To Function,
     type STRING
 );
 CREATE REL TABLE IF NOT EXISTS IMPORTS (

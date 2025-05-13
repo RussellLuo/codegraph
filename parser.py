@@ -110,6 +110,20 @@ class Parser:
                                     )
                                 )
 
+                    cls_body_node = child.child_by_field_name("body")
+                    for body_child in cls_body_node.children:
+                        match body_child.type:
+                            case "function_definition":
+                                meth_node = self.parse_method(node, body_child)
+                                self.nodes.append(meth_node)
+                                self.relationships.append(
+                                    Relationship(
+                                        type=EdgeType.CONTAINS,
+                                        from_=node,
+                                        to_=meth_node,
+                                    )
+                                )
+
     def parse_import(self, file_node: Node, child: tree_sitter.Node) -> list[Node]:
         # 处理普通import语句(如import os, sys)
         imps: list[Node] = []
@@ -187,6 +201,18 @@ class Parser:
         return Node(
             type=NodeType.CLASS,
             name=f"{file_node.name}:{class_name}",
+            code=code,
+            start=self._create_point(child.start_point),
+            end=self._create_point(child.end_point),
+        )
+
+    def parse_method(self, class_node: Node, child: tree_sitter.Node) -> Node:
+        name_node = child.child_by_field_name("name")
+        func_name = name_node.text.decode().strip()
+        code = child.text.decode()
+        return Node(
+            type=NodeType.FUNCTION,
+            name=f"{class_node.name}.{func_name}",
             code=code,
             start=self._create_point(child.start_point),
             end=self._create_point(child.end_point),

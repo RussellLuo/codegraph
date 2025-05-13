@@ -64,14 +64,19 @@ class Node:
                 return [name, lower]
             return [name]
 
-        if ":" in self.name:
-            # "src/a.py:A" => A, a
-            attribute_name = self.name.rsplit(":", 1)[-1]
-            return make_names(attribute_name)
-        else:
+        if ":" not in self.name:
             # "src/a.py" => a
             file_name = self.name.rsplit("/", 1)[-1]
             return make_names(file_name)
+
+        # "src/a.py:A" => A, a
+        attr_name = self.name.rsplit(":", 1)[-1]
+        if "." not in attr_name:
+            return make_names(attr_name)
+
+        # "src/a.py:A.meth" => meth
+        sub_attr_name = attr_name.rsplit(".", 1)[-1]
+        return make_names(sub_attr_name)
 
     def to_dict(self) -> dict:
         match self.type:
