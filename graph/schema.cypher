@@ -36,13 +36,23 @@ CREATE NODE TABLE IF NOT EXISTS Function (
     end_line UINT32,
     PRIMARY KEY(name)
 );
+CREATE NODE TABLE IF NOT EXISTS Variable (
+    name STRING,
+    type STRING,
+    short_names STRING[],
+    code STRING,
+    start_line UINT32,
+    end_line UINT32,
+    PRIMARY KEY(name)
+);
 
 // Create relationships
 CREATE REL TABLE IF NOT EXISTS CONTAINS (
     From Directory To Directory,
     From Directory To File,
-    From File To Function,
     From File To Class,
+    From File To Function,
+    From File To Variable,
     From Class To Function,
     type STRING
 );
@@ -50,6 +60,7 @@ CREATE REL TABLE IF NOT EXISTS IMPORTS (
     From File To File,
     From File To Class,
     From File To Function,
+    From File To Variable,
     From File To Unparsed,
     type STRING,
     import STRING,

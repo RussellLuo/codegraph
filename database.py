@@ -93,9 +93,7 @@ class Node:
                     "short_names": self.short_names,
                     "code": self.code,
                 }
-            case NodeType.VARIABLE:
-                pass
-            case NodeType.FUNCTION | NodeType.CLASS:
+            case NodeType.CLASS | NodeType.FUNCTION | NodeType.VARIABLE:
                 return {
                     "name": self.name,
                     "type": self.type.value,

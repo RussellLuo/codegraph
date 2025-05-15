@@ -1,5 +1,5 @@
 import argparse
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 import dataclasses
 import fnmatch
 import os
@@ -39,10 +39,13 @@ class Parser:
         self.repo_path: str = repo_path
         self.module_search_paths: list[str] = module_search_paths
 
-        self.nodes: list[Node] = []
+        self.nodes: OrderedDict[str, Node] = OrderedDict()
         self.relationships: list[Relation] = []
         self.file_imports: dict[Node, list[Import]] = defaultdict(list)
         self.file_inherits: dict[Node, list[Inherit]] = defaultdict(list)
+
+    def _add_node(self, node: Node) -> None:
+        self.nodes[node.name] = node
 
     def parse_code(self, file_node: Node):
         """解析源代码并提取模块级元素"""
@@ -62,9 +65,9 @@ class Parser:
 
                 # 提取模块级变量定义
                 case "expression_statement":
-                    node = None  # self.parse_variable(file_node, child)
+                    node = self.parse_variable(file_node, child)
                     if node:
-                        self.nodes.append(node)
+                        self._add_node(node)
                         self.relationships.append(
                             Relationship(
                                 type=EdgeType.CONTAINS,
@@ -76,7 +79,7 @@ class Parser:
                 # 提取函数定义
                 case "function_definition":
                     node = self.parse_function(file_node, child)
-                    self.nodes.append(node)
+                    self._add_node(node)
                     self.relationships.append(
                         Relationship(
                             type=EdgeType.CONTAINS,
@@ -88,7 +91,7 @@ class Parser:
                 # 提取类定义
                 case "class_definition":
                     node = self.parse_class(file_node, child)
-                    self.nodes.append(node)
+                    self._add_node(node)
                     self.relationships.append(
                         Relationship(
                             type=EdgeType.CONTAINS,
@@ -115,7 +118,7 @@ class Parser:
                         match body_child.type:
                             case "function_definition":
                                 meth_node = self.parse_method(node, body_child)
-                                self.nodes.append(meth_node)
+                                self._add_node(meth_node)
                                 self.relationships.append(
                                     Relationship(
                                         type=EdgeType.CONTAINS,
@@ -170,17 +173,23 @@ class Parser:
         return imps
 
     def parse_variable(self, file_node: Node, child: tree_sitter.Node) -> Node | None:
-        assignment = child.children[0] if child.children else None
-        if assignment and assignment.type == "assignment":
-            identifier = assignment.child_by_field_name("left")
-            var_name = identifier.text.decode()
-            return Node(
-                type=NodeType.VARIABLE,
-                name=f"{file_node.name}:{var_name}",
-                start=self._create_point(identifier.start_point),
-                end=self._create_point(identifier.end_point),
-            )
-        return None
+        assignment = child.children[0]
+        if assignment.type == "augmented_assignment":
+            # Skip for now
+            return None
+        identifier = assignment.child_by_field_name("left")
+        if not identifier:
+            return None
+
+        var_name = identifier.text.decode()
+        code = assignment.text.decode()
+        return Node(
+            type=NodeType.VARIABLE,
+            name=f"{file_node.name}:{var_name}",
+            code=code,
+            start=self._create_point(identifier.start_point),
+            end=self._create_point(identifier.end_point),
+        )
 
     def parse_function(self, file_node: Node, child: tree_sitter.Node) -> Node:
         name_node = child.child_by_field_name("name")
@@ -458,12 +467,12 @@ class Parser:
 
         if os.path.isfile(path):
             file_node = self.parse_file(path, root)
-            self.nodes.append(file_node)
+            self._add_node(file_node)
             return
 
         # 处理目录
         dir_node = self.create_directory_node(path, root)
-        self.nodes.append(dir_node)
+        self._add_node(dir_node)
         parent_nodes = {path: dir_node}  # 缓存父目录节点
 
         for base, dirs, files in os.walk(path):
@@ -480,7 +489,7 @@ class Parser:
                     continue
 
                 file_node = self.parse_file(file_path, root)
-                self.nodes.append(file_node)
+                self._add_node(file_node)
                 self.relationships.append(
                     Relationship(
                         type=EdgeType.CONTAINS,
@@ -493,7 +502,7 @@ class Parser:
             for dir in dirs:
                 dir_path = os.path.join(base, dir)
                 child_dir_node = self.create_directory_node(dir_path, root)
-                self.nodes.append(child_dir_node)
+                self._add_node(child_dir_node)
                 self.relationships.append(
                     Relationship(
                         type=EdgeType.CONTAINS,
@@ -561,7 +570,7 @@ class Parser:
 
     def save_to_db(self, output: str) -> None:
         # Save nodes
-        self.db.batch_add_nodes(*self.nodes)
+        self.db.batch_add_nodes(*self.nodes.values())
 
         # Save CONTAINS relationships
         self.db.batch_add_relationships(*self.relationships)
