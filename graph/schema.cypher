@@ -66,9 +66,23 @@ CREATE REL TABLE IF NOT EXISTS IMPORTS (
     import STRING,
     alias STRING
 );
-
 CREATE REL TABLE IF NOT EXISTS INHERITS (
     From Class To Unparsed,
     From Class To Class,
+    type STRING
+);
+CREATE REL TABLE IF NOT EXISTS REFERENCES (
+    From Class To Class,
+    From Class To Function,
+    From Class To Variable,
+    From Class To Unparsed,
+    From Function To Class,
+    From Function To Function,
+    From Function To Variable,
+    From Function To Unparsed,
+    From Variable To Class,
+    From Variable To Function,
+    From Variable To Variable,
+    From Variable To Unparsed,
     type STRING
 );

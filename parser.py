@@ -19,6 +19,12 @@ from database import (
 PY_LANGUAGE = tree_sitter.Language(tree_sitter_python.language())
 parser = tree_sitter.Parser(PY_LANGUAGE)
 
+with open("./references.scm", "r") as f:
+    QUERY = PY_LANGUAGE.query(f.read())
+
+
+FILE_CONTAINING_NODE_CACHE = {}
+
 
 @dataclasses.dataclass
 class Import:
@@ -563,6 +569,136 @@ class Parser:
 
         return ""
 
+    def _get_containing_node(self, node: Node) -> list[Node]:
+        containing_nodes = FILE_CONTAINING_NODE_CACHE.get(node.name)
+        if not containing_nodes:
+            containing_nodes = self.db.traverse_nodes(
+                node.name,
+                "downstream",
+                relationship_type_filter=[EdgeType.IMPORTS, EdgeType.CONTAINS],
+            )
+            FILE_CONTAINING_NODE_CACHE[node.name] = containing_nodes
+        return containing_nodes
+
+    def resolve_reference_relationships(self, node: Node) -> list[Relationship]:
+        referenced_nodes: set[Node] = set()
+
+        def parse_reference_names(code: str) -> list[str]:
+            tree = parser.parse(code.encode(), encoding="utf8")
+            captures = QUERY.captures(tree.root_node)
+            if not captures:
+                return []
+            return [n.text.decode() for n in captures["name.reference"]]
+
+        def resolve(node: Node, reference_names: list[str]):
+            result = self.db.traverse_nodes(
+                node.name,
+                "upstream",
+                node_type_filter=[NodeType.FILE],
+                relationship_type_filter=[EdgeType.CONTAINS],
+                limit=1,
+            )
+            if not result:
+                return
+            parent_file_node = result[0][0]
+
+            containing_nodes = self._get_containing_node(parent_file_node)
+            for n, r in containing_nodes:
+                for name in reference_names:
+                    match r.type:
+                        case EdgeType.IMPORTS:
+                            imp_name = r.alias or r.import_
+                            if name == imp_name:
+                                # Reference module-level class/function/variable imported from a file (module)
+                                referenced_nodes.add(n)
+                            elif name.startswith(imp_name):
+                                # Reference module-level class/function/variable from an imported file (module)
+                                attr_name = name[
+                                    len(imp_name) + 1 :
+                                ]  # Remove one more "."
+                                if n.type == NodeType.FILE:
+                                    # attribute from file
+                                    attr_node_name = f"{n.name}:{attr_name}"
+                                elif n.type in (NodeType.CLASS, NodeType.UNPARSED):
+                                    # methods from class
+                                    attr_node_name = f"{n.name}.{attr_name}"
+                                elif n.type == NodeType.VARIABLE:
+                                    # the varialbe might be an instance of a class?
+                                    # TODO: not supported fo now.
+                                    attr_node_name = ""
+                                else:  # NodeType.FUNCTION
+                                    # TODO: more complicated, not supported for now.
+                                    attr_node_name = ""
+
+                                attr_node = self.db.get_node(attr_node_name)
+                                if not attr_node and attr_node_name:
+                                    # might be an attribute from external lib
+                                    # let it be unparsed for now.
+                                    attr_node = Node(
+                                        type=NodeType.UNPARSED,
+                                        name=attr_node_name,
+                                    )
+                                    self.db.upsert_node(attr_node)
+                                if attr_node:
+                                    referenced_nodes.add(attr_node)
+
+                        case EdgeType.CONTAINS:
+                            # Reference module-level class or function or variable defined in the same file (module)
+                            n_short_name = n.short_names[0]
+                            if name == n_short_name:
+                                referenced_nodes.add(n)
+                            elif name.startswith(n_short_name):
+                                attr_name = name[
+                                    len(n_short_name) + 1 :
+                                ]  # Remove one more "."
+                                if n.type == NodeType.CLASS:
+                                    # methods from class
+                                    attr_node_name = f"{n.name}.{attr_name}"
+                                elif n.type == NodeType.VARIABLE:
+                                    # the varialbe might be an instance of a class?
+                                    # TODO: not supported fo now.
+                                    attr_node_name = ""
+                                else:  # NodeType.FUNCTION
+                                    # TODO: more complicated, not supported for now.
+                                    attr_node_name = ""
+
+                                attr_node = self.db.get_node(attr_node_name)
+                                if not attr_node and attr_node_name:
+                                    # might be an attribute (inhertis) from external lib
+                                    # let it be unparsed for now.
+                                    attr_node = Node(
+                                        type=NodeType.UNPARSED,
+                                        name=attr_node_name,
+                                    )
+                                    self.db.upsert_node(attr_node)
+                                if attr_node:
+                                    referenced_nodes.add(attr_node)
+
+        match node.type:
+            case NodeType.CLASS:
+                names = parse_reference_names(node.code)
+                if names:
+                    resolve(node, names)
+
+            case NodeType.FUNCTION:
+                names = parse_reference_names(node.code)
+                if names:
+                    resolve(node, names)
+
+            case NodeType.VARIABLE:
+                names = parse_reference_names(node.code)
+                if names:
+                    resolve(node, names)
+
+        return [
+            Relationship(
+                type=EdgeType.REFERENCES,
+                from_=node,
+                to_=n,
+            )
+            for n in referenced_nodes
+        ]
+
     def create_directory_node(self, path: str, root: str = "") -> Node:
         """添加目录节点到结果列表"""
         rel_path = os.path.relpath(path, root) if root else path
@@ -618,6 +754,23 @@ class Parser:
                     )
                 )
         self.db.batch_add_relationships(*inherits_relationships)
+
+        # Save REFERENCES relationships
+        references_relationships: list[Relationship] = []
+        for _, node in self.nodes.items():
+            relationships = self.resolve_reference_relationships(node)
+            # Filter out REFERENCES relationship to FILE node
+            # FIXME: there is a bug.
+            # example:
+            #   from pylint.lint.run import Run
+            # will be resolved to a FILE node:
+            #   /opt/miniconda3/envs/crmaestro/lib/python3.12/site-packages/pylint/lint/Run.py
+            # while the actual node is:
+            #   /opt/miniconda3/envs/crmaestro/lib/python3.12/site-packages/pylint/lint/run.py:Run
+            relationships = [r for r in relationships if r.to_.type != NodeType.FILE]
+            if relationships:
+                references_relationships.extend(relationships)
+        self.db.batch_add_relationships(*references_relationships)
 
 
 def main():

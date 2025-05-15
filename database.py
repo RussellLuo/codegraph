@@ -22,8 +22,8 @@ class NodeType(str, enum.Enum):
 class EdgeType(str, enum.Enum):
     CONTAINS = "contains"
     IMPORTS = "imports"
-    INVOKES = "invokes"
     INHERITS = "inherits"
+    REFERENCES = "references"
 
 
 @dataclasses.dataclass
@@ -114,9 +114,20 @@ class Relationship:
     import_: str | None = None
     alias: str | None = None
 
+    @classmethod
+    def from_dict(cls, data: dict) -> Relationship:
+        from_, to_ = data["type"].split("_")
+        return Relationship(
+            type=EdgeType(data["_label"].lower()),
+            from_=Node(type=NodeType(from_), name=""),
+            to_=Node(type=NodeType(to_), name=""),
+            import_=data.get("import"),
+            alias=data.get("alias"),
+        )
+
     def to_dict(self) -> dict:
         match self.type:
-            case EdgeType.CONTAINS | EdgeType.INHERITS:
+            case EdgeType.CONTAINS | EdgeType.INHERITS | EdgeType.REFERENCES:
                 return {
                     "from": self.from_.name,
                     "to": self.to_.name,
@@ -219,3 +230,54 @@ class Database:
             parameters={"name": name},
         )
         return bool(result)
+
+    def traverse_nodes(
+        self,
+        start_node_name: str,
+        direction: str,
+        depth: int = 1,
+        node_type_filter: list[str] | None = None,
+        relationship_type_filter: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[tuple[Node, Relationship]]:
+        depth = min(
+            depth if depth > 0 else 1, 5
+        )  # Limit depth to 5 for performance reasons.
+        level = f"*1..{depth}"
+
+        rel_labels = ""
+        if relationship_type_filter:
+            rel_labels = "|".join(f":{dep.upper()}" for dep in relationship_type_filter)
+        relationship = f"-[b{rel_labels}{level}]-"
+
+        match direction:
+            case "downstream":
+                relationship = f"{relationship}>"
+            case "upstream":
+                relationship = f"<{relationship}"
+            case _:  # Including "both"
+                pass
+
+        target_nodes = ""
+        if node_type_filter:
+            target_nodes = f":{':'.join(node_type_filter).title()}"
+
+        result = self.execute(
+            f"""
+            MATCH (a){relationship}(c{target_nodes})
+            WHERE a.name = $start_node_name
+            RETURN b, c
+            LIMIT {limit};
+            """,
+            parameters={"start_node_name": start_node_name},
+        )
+
+        nodes_with_relationships: list[tuple[Node, Relationship]] = []
+        for r in result:
+            nodes_with_relationships.append(
+                (
+                    Node.from_dict(r[1]),
+                    Relationship.from_dict(r[0]["_rels"][0]),
+                )
+            )
+        return nodes_with_relationships
