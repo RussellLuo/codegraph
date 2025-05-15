@@ -12,7 +12,7 @@ db = Database("./graph/db")
 
 @mcp.tool()
 def search_entities(search_terms: list[str]) -> str:
-    """Searches the codebase to retrieve relevant code entities based on given query terms.
+    """Searches the codebase to retrieve relevant code entities (file/class/function) based on given query terms.
 
     Note:
     1. If `search_terms` are provided, it searches for code snippets based on each term:
@@ -78,13 +78,12 @@ def traverse_graph(
     direction: str = "downstream",
     traversal_depth: int = 1,
     entity_type_filter: list[str] | None = None,
-    dependency_type_filter: list[str] | None = None,
+    relationship_type_filter: list[str] | None = None,
 ) -> str:
-    """Analyzes and displays the dependency structure around specified entities in a code graph.
+    """Analyzes and displays the relationship structure around specified entities in a code graph.
 
-    This function searches and presents relationships and dependencies for the specified entities (such as classes, functions, files, or directories) in a code graph.
-    It explores how the input entities relate to others, using defined types of dependencies, including 'contains', 'imports', 'invokes' and 'inherits'.
-    The search can be controlled to traverse upstream (exploring dependencies that entities rely on) or downstream (exploring how entities impact others), with optional limits on traversal depth and filters for entity and dependency types.
+    This function searches and presents relationships for the specified entities (such as classes, functions, files, or directories) in a code graph.
+    It explores how the input entities relate to others, using defined types of relationships, including 'contains', 'imports', 'invokes' and 'inherits'.
 
     Example Usage:
     1. Exploring Outward Dependencies:
@@ -94,10 +93,10 @@ def traverse_graph(
             direction='downstream',
             traversal_depth=2,
             entity_type_filter=['class', 'function'],
-            dependency_type_filter=['invokes', 'imports']
+            relationship_type_filter=['invokes', 'imports']
         )
         ```
-        This retrieves the dependencies of `ClassA` up to 2 levels deep, focusing only on classes and functions with 'invokes' and 'imports' relationships.
+        This retrieves the relationships of `ClassA` up to 2 levels deep, focusing only on what classes and functions `ClassA` invokes and imports.
 
     2. Exploring Inward Dependencies:
         ```
@@ -107,11 +106,11 @@ def traverse_graph(
             traversal_depth=-1
         )
         ```
-        This finds all entities that depend on `FunctionY` without restricting the traversal depth.
+        This finds all entities that contain/inherit/import/invoke `FunctionY` without restricting the traversal depth.
 
     Notes:
     * Traversal Control: The `traversal_depth` parameter specifies how deep the function should explore the graph starting from the input entities.
-    * Filtering: Use `entity_type_filter` and `dependency_type_filter` to narrow down the scope of the search, focusing on specific entity types and relationships.
+    * Filtering: Use `entity_type_filter` and `relationship_type_filter` to narrow down the scope of the search, focusing on specific entity types and relationships.
     * Graph Context: The function operates on a pre-built code graph containing entities (e.g., files, classes and functions) and dependencies representing their interactions and relationships.
 
     Parameters:
@@ -124,10 +123,9 @@ def traverse_graph(
 
     direction : str, optional
         Direction of traversal in the code graph; allowed options are:
-        - 'downstream': Traversal to explore dependencies that the specified entities rely on (how they depend on others).
-        - 'upstream': Traversal to explore the effects or interactions of the specified entities on others
-          (how others depend on them).
-        Default is 'downstream'.
+        - 'downstream': Traversal to explore relationships from the specified entities to the candidate entities.
+        - 'upstream': Traversal to explore relationships from the candidate entities to the specified entities.
+        Default is 'downstream'. Specially for the 'inherits' relationship, use 'downstream' to find the parent class and 'upstream' to find the child classes.
 
     traversal_depth : int, optional
         Maximum depth of traversal. A value of -1 indicates unlimited depth (subject to a maximum limit).
@@ -139,9 +137,9 @@ def traverse_graph(
         If None, all entity types are included.
         Default is None.
 
-    dependency_type_filter : list[str], optional
-        List of dependency types (e.g., 'contains', 'imports', 'invokes', 'inherits') to include in the traversal.
-        If None, all dependency types are included.
+    relationship_type_filter : list[str], optional
+        List of relationship types (e.g., 'contains', 'imports', 'invokes', 'inherits') to include in the traversal.
+        If None, all relationship types are included.
         Default is None.
 
     Returns:
@@ -155,7 +153,7 @@ def traverse_graph(
             direction,
             traversal_depth,
             entity_type_filter,
-            dependency_type_filter,
+            relationship_type_filter,
         )
         for node in start_entities
     }
