@@ -4,41 +4,30 @@ import json
 from mcp.server.fastmcp import FastMCP
 import kuzu
 
-from database import Database, Node
+from database import Database, Node, NodeType
 
 mcp = FastMCP("Demo")
 db = Database("./graph/db")
 
 
 @mcp.tool()
-def search_entities(search_terms: list[str]) -> str:
-    """Searches the codebase to retrieve relevant code entities (file/class/function) based on given query terms.
-
-    Note:
-    1. If `search_terms` are provided, it searches for code snippets based on each term:
-        - If a term is formatted as 'file_path:QualifiedName' (e.g., 'src/helpers/math_helpers.py:MathUtils.calculate_sum') ,
-          or just 'file_path', the corresponding complete code is retrieved or file content is retrieved.
-        - If a term matches a file, class, or function name, matched entities are retrieved.
+def locate_entities(search_terms: list[str]) -> str:
+    """Searches the codebase to retrieve the locations of relevant entities (file/class/function) based on given query terms.
 
     Args:
-        search_terms (Optional[List[str]]): A list of names, keywords, or code snippets to search for within the codebase.
+        search_terms (List[str]): A list of names, keywords to search for within the codebase.
             Terms can be formatted as 'file_path:QualifiedName' to search for a specific module or entity within a file
-            (e.g., 'src/helpers/math_helpers.py:MathUtils.calculate_sum') or as 'file_path' to retrieve the complete content
-            of a file. This can also include potential function names, class names, or general code fragments.
+            (e.g., 'src/helpers/math_helpers.py:MathUtils.calculate_sum') or unqualified names to search for occurrences anywhere within the codebase.
 
     Returns:
-        str: The search results, which may include code snippets, matching entities, or complete file content.
-
+        str: The search results, which are the locations of matching entities.
 
     Example Usage:
-        # Search for the full content of a specific file
-        result = search_entities(search_terms=['src/my_file.py'])
+        # Search for the location of a specific file
+        result = locate_entities(search_terms=['my_file.py'])
 
-        # Search for a specific class
-        result = search_entities(search_terms=['src/my_file.py:MyClass'])
-
-        # Search for a keyword in the style of an unqualified name
-        result = search_entities(search_terms=["MyClass"]
+        # Search for the location of a specific class
+        result = locate_entities(search_terms=['MyClass'])
     """
     nodes: list[Node] = []
     for term in search_terms:
@@ -65,6 +54,8 @@ def search_entities(search_terms: list[str]) -> str:
             {
                 "name": node.name,
                 "type": node.type,
+                "start_line": node.start.line,
+                "end_line": node.end.line,
             }
             for node in nodes
         ],
@@ -72,7 +63,7 @@ def search_entities(search_terms: list[str]) -> str:
     )
 
 
-@mcp.tool()
+# @mcp.tool()
 def traverse_graph(
     start_entities: list[str],
     direction: str = "downstream",
@@ -83,7 +74,7 @@ def traverse_graph(
     """Analyzes and displays the relationship structure around specified entities in a code graph.
 
     This function searches and presents relationships for the specified entities (such as classes, functions, files, or directories) in a code graph.
-    It explores how the input entities relate to others, using defined types of relationships, including 'contains', 'imports', 'invokes' and 'inherits'.
+    It explores how the input entities relate to others, using defined types of relationships, including 'contains', 'imports', 'references' and 'inherits'.
 
     Example Usage:
     1. Exploring Outward Dependencies:
@@ -91,12 +82,12 @@ def traverse_graph(
         traverse_graph(
             start_entities=['src/module_a.py:ClassA'],
             direction='downstream',
-            traversal_depth=2,
-            entity_type_filter=['class', 'function'],
-            relationship_type_filter=['invokes', 'imports']
+            traversal_depth=1,
+            entity_type_filter=['class'],
+            relationship_type_filter=['inherits']
         )
         ```
-        This retrieves the relationships of `ClassA` up to 2 levels deep, focusing only on what classes and functions `ClassA` invokes and imports.
+        This retrieves the relationships of `ClassA` up to 1 level deep, focusing only on what classes `ClassA` inherits, i.e., its parent classes.
 
     2. Exploring Inward Dependencies:
         ```
@@ -106,7 +97,7 @@ def traverse_graph(
             traversal_depth=-1
         )
         ```
-        This finds all entities that contain/inherit/import/invoke `FunctionY` without restricting the traversal depth.
+        This finds all entities that contain/inherit/import/reference `FunctionY` without restricting the traversal depth.
 
     Notes:
     * Traversal Control: The `traversal_depth` parameter specifies how deep the function should explore the graph starting from the input entities.
@@ -138,7 +129,7 @@ def traverse_graph(
         Default is None.
 
     relationship_type_filter : list[str], optional
-        List of relationship types (e.g., 'contains', 'imports', 'invokes', 'inherits') to include in the traversal.
+        List of relationship types (e.g., 'contains', 'imports', 'references', 'inherits') to include in the traversal.
         If None, all relationship types are included.
         Default is None.
 
@@ -159,6 +150,60 @@ def traverse_graph(
     }
     rtn_str = json.dumps(rtns)
     return rtn_str.strip()
+
+
+@mcp.tool()
+def search_parent_or_child_entities(entity_names: list[str], direction: str) -> str:
+    """
+    Searches for entities that are the parent classes of the given entity name.
+
+    Args:
+        entity_names (List[str]): List of entity names in a full-qualified format (e.g., 'src/module_a.py:ClassA').
+        direction (str): The direction of the search. Can be 'parent' or 'child'.
+
+    Returns:
+        str: All the parent or child class entities.
+    """
+    direction = "downstream" if direction == "parent" else "upstream"  # type: ignore
+    return traverse_graph(
+        start_entities=entity_names,
+        direction=direction,
+        traversal_depth=1,
+        entity_type_filter=["class", "unparsed"],
+        relationship_type_filter=["inherits"],
+    )
+
+
+@mcp.tool()
+def search_reference_entities(entity_name: str) -> str:
+    """
+    Searches for entities that reference (imports/inherits/references) the given entity name.
+
+    Args:
+        entity_name (List[str]): The entity name in a full-qualified format (e.g., 'src/module_a.py:ClassA').
+
+    Returns:
+        str: All the matching entities.
+    """
+    result = db.execute(
+        """
+        MATCH (a)<-[b:IMPORTS|:INHERITS|:REFERENCES]-(c)
+        WHERE a.name = $entity_name
+        RETURN c;
+        """,
+        parameters={"entity_name": entity_name},
+    )
+    if not result:
+        return {}
+
+    entities: list[str] = []
+    for r in result:
+        data = r[0]
+        name = f"{data['name']}"
+        if data["type"] in (NodeType.CLASS, NodeType.FUNCTION, NodeType.VARIABLE):
+            name = f"{name}#L{data['start_line']}-L{data['end_line']}"
+        entities.append(name)
+    return json.dumps(entities, indent=2)
 
 
 def traverse_json_structure(
