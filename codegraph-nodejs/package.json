@@ -1,0 +1,62 @@
+{
+  "name": "@codenav/codenav",
+  "version": "0.0.2",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "codenav",
+    "triples": {
+      "additional": [
+        "aarch64-apple-darwin",
+        "aarch64-linux-android",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-unknown-linux-musl",
+        "aarch64-pc-windows-msvc",
+        "armv7-unknown-linux-gnueabihf",
+        "armv7-unknown-linux-musleabihf",
+        "x86_64-unknown-linux-musl",
+        "x86_64-unknown-freebsd",
+        "i686-pc-windows-msvc",
+        "armv7-linux-androideabi",
+        "universal-apple-darwin",
+        "riscv64gc-unknown-linux-gnu"
+      ]
+    }
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.4",
+    "@swc-node/register": "^1.10.6",
+    "@swc/core": "^1.6.13",
+    "ava": "^6.1.3",
+    "typescript": "^5.5.3"
+  },
+  "ava": {
+    "extensions": {
+      "ts": "module"
+    },
+    "timeout": "2m",
+    "workerThreads": false,
+    "environmentVariables": {
+      "TS_NODE_PROJECT": "./tsconfig.json"
+    },
+    "nodeArguments": [
+      "--import",
+      "@swc-node/register/esm-register"
+    ]
+  },
+  "engines": {
+    "node": ">= 10"
+  },
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "prepublishOnly": "napi prepublish -t npm --skip-gh-release",
+    "test": "ava",
+    "universal": "napi universal",
+    "version": "napi version"
+  },
+  "packageManager": "yarn@4.5.0",
+  "repository": "https://github.com/RussellLuo/codenav"
+}
