@@ -1,10 +1,10 @@
 {
-  "name": "@codenav/codenav",
+  "name": "@codegraph/codegraph",
   "version": "0.0.2",
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
-    "name": "codenav",
+    "name": "codegraph",
     "triples": {
       "additional": [
         "aarch64-apple-darwin",
@@ -58,5 +58,5 @@
     "version": "napi version"
   },
   "packageManager": "yarn@4.5.0",
-  "repository": "https://github.com/RussellLuo/codenav"
+  "repository": "https://github.com/RussellLuo/codegraph"
 }

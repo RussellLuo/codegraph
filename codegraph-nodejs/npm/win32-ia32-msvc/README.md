@@ -1,3 +1,3 @@
-# `@codenav/codenav-win32-ia32-msvc`
+# `@codegraph/codegraph-win32-ia32-msvc`
 
-This is the **i686-pc-windows-msvc** binary for `@codenav/codenav`
+This is the **i686-pc-windows-msvc** binary for `@codegraph/codegraph`

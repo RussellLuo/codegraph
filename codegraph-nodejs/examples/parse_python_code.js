@@ -1,12 +1,16 @@
 import * as codegraph from '../index.js';
+import * as path from 'path';
 
-const graph = new CodeGraph("./graph/test_db");
+const REPO_DIR = path.join(path.dirname(path.dirname(import.meta.dirname)), 'examples', 'python');
+const CODE_DIR = path.join(REPO_DIR, 'd.py');
 
-graph.index("/your/repo/path", "/your/code/path");
+const graph = new codegraph.CodeGraph("./graph/test_db");
+
+graph.index(REPO_DIR, CODE_DIR);
 
 const nodes = graph.query("MATCH (n) RETURN *");
 for (let n of nodes ) {
-  console.log(`${n.name}:${n.startLine}:${n.endLine}`);
+  console.log(`${n.name}(${n.startLine}:${n.endLine})`);
   console.log(n.code);
 }
 

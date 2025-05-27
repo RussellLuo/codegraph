@@ -1,3 +1,3 @@
-# `@codenav/codenav-darwin-x64`
+# `@codegraph/codegraph-darwin-x64`
 
-This is the **x86_64-apple-darwin** binary for `@codenav/codenav`
+This is the **x86_64-apple-darwin** binary for `@codegraph/codegraph`

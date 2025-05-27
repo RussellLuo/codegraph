@@ -1,3 +1,3 @@
-# `@codenav/codenav-android-arm-eabi`
+# `@codegraph/codegraph-android-arm-eabi`
 
-This is the **armv7-linux-androideabi** binary for `@codenav/codenav`
+This is the **armv7-linux-androideabi** binary for `@codegraph/codegraph`

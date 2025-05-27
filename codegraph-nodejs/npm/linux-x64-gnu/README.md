@@ -1,3 +1,3 @@
-# `@codenav/codenav-linux-x64-gnu`
+# `@codegraph/codegraph-linux-x64-gnu`
 
-This is the **x86_64-unknown-linux-gnu** binary for `@codenav/codenav`
+This is the **x86_64-unknown-linux-gnu** binary for `@codegraph/codegraph`

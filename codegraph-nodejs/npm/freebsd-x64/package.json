@@ -1,5 +1,5 @@
 {
-  "name": "@codenav/codenav-freebsd-x64",
+  "name": "@codegraph/codegraph-freebsd-x64",
   "version": "0.0.2",
   "os": [
     "freebsd"
@@ -7,14 +7,14 @@
   "cpu": [
     "x64"
   ],
-  "main": "codenav.freebsd-x64.node",
+  "main": "codegraph.freebsd-x64.node",
   "files": [
-    "codenav.freebsd-x64.node"
+    "codegraph.freebsd-x64.node"
   ],
-  "description": "Node.js bindings for CodeNav.",
+  "description": "Node.js bindings for codegraph.",
   "license": "MIT",
   "engines": {
     "node": ">= 10"
   },
-  "repository": "https://github.com/RussellLuo/codenav"
+  "repository": "https://github.com/RussellLuo/codegraph"
 }

@@ -1,24 +1,23 @@
 import test from 'ava';
 
 import * as path from 'path';
-const EXAMPLES_DIR = path.join(path.dirname(path.dirname(import.meta.dirname)), 'examples', 'python');
+const REPO_DIR = path.join(path.dirname(path.dirname(import.meta.dirname)), 'examples', 'python');
+const CODE_DIR = path.join(REPO_DIR, 'd.py');
 
-import * as codenav from '../index.js';
-const nav = new codenav.Navigator(codenav.Language.Python, 'test.sqlite', false);
+import * as codegraph from '../index.js';
+const graph = new codegraph.CodeGraph('db');
 
 test('resloving references', (t) => {
-  nav.index([EXAMPLES_DIR], false);
-
-  const reference = {path: path.join(EXAMPLES_DIR, 'chef.py'), line: 2, column: 0, text: 'broil'};
-  const definitions = nav.resolve(reference);
+  graph.index(REPO_DIR, CODE_DIR);
+  const nodes = graph.query("MATCH (n) RETURN *;");
 
   let defs: string[] = [];
-  for (let d of definitions) {
-    const filename = path.basename(d.path);
-    defs.push(`${filename}:${d.span.start.line}:${d.span.start.column}`);
+  for (let n of nodes) {
+    const name = path.basename(n.name);
+    defs.push(`${name}(${n.startLine}:${n.endLine})`);
   }
 
-  nav.clean(true);
+  graph.clean();
 
-  t.deepEqual(defs, ['chef.py:0:20', 'kitchen.py:2:4'], 'unexpected definitions');
+  t.deepEqual(defs, ['d.py:D1(1:3)', 'd.py:D2(6:8)', 'd.py:D(11:12)'], 'unexpected definitions');
 })

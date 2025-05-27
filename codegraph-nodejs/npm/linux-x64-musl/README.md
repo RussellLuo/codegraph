@@ -1,3 +1,3 @@
-# `@codenav/codenav-linux-x64-musl`
+# `@codegraph/codegraph-linux-x64-musl`
 
-This is the **x86_64-unknown-linux-musl** binary for `@codenav/codenav`
+This is the **x86_64-unknown-linux-musl** binary for `@codegraph/codegraph`

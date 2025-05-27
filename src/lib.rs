@@ -99,9 +99,15 @@ impl Database {
 
             for node in nodes {
                 let table_name = to_title_case(node.typ.to_string().as_str());
-                let data = format!("name: {:?}, type: {:?}, start_line: {}, end_line: {}, code: {:?}", node.name, node.typ.to_string(), node.start_line, node.end_line, node.code);
-                //println!("DATA: {}", data);
-                conn.query(format!("MERGE (n:{} {{ {} }}) RETURN n.*;", table_name, data).as_str());
+                let data = format!(
+                    "name: {}, type: {}, start_line: {}, end_line: {}, code: {}",
+                    repr_string(node.name.as_str()),
+                    repr_string(node.typ.to_string().as_str()),
+                    node.start_line,
+                    node.end_line,
+                    repr_string(node.code.as_str()),
+                );
+                conn.query(format!("MERGE (n:{} {{ {} }}) RETURN n.*;", table_name, data).as_str())?;
             }
         }
 
@@ -115,9 +121,6 @@ impl Database {
             let conn = kuzu::Connection::new(db)?;
             let mut result = conn.query(stmt)?;
             for row in result {
-                // 正确访问kuzu查询结果中的值
-                // r[0]是一个Value类型，需要使用适当的方法来获取其字符串表示
-                //println!("{}", r[0].to_string());
                 match &row[0] {
                     kuzu::Value::Node(node) => {
                         let props= node.get_properties();
@@ -140,7 +143,7 @@ impl Database {
                         if let kuzu::Value::UInt32(line) = &props[4].1 {
                             node.start_line = *line as usize;
                         }
-                        if let kuzu::Value::UInt32(line) = &props[4].1 {
+                        if let kuzu::Value::UInt32(line) = &props[5].1 {
                             node.end_line = *line as usize;
                         }
                         nodes.push(node);
@@ -151,6 +154,24 @@ impl Database {
         }
         Ok(nodes)
     }
+    
+    
+    pub fn clean(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(db) = &self.db {
+            let conn = kuzu::Connection::new(db)?;
+            // Delete all records
+            let _ = conn.query("MATCH (n) DETACH DELETE n;")?;
+        }
+        Ok(())
+    }
+}
+
+fn repr_string(s: &str) -> String {
+    // 添加引号，同时保留原始字符串内容
+    format!("{:?}", s)
+        .replace("\\n", "\n") // 把转义的 \n 替换回实际换行符
+        .replace("\\t", "\t") // 同样处理制表符
+        .replace("\\r", "\r") // 同样处理回车符
 }
 
 fn to_title_case(s: &str) -> String {
@@ -237,8 +258,8 @@ impl Parser {
                         let node = Node {
                             name: format!("{}:{}", file_path, class_name),
                             typ: NodeType::CLASS,
-                            start_line: class_node.start_position().row,
-                            end_line: class_node.end_position().row,
+                            start_line: class_node.start_position().row + 1,
+                            end_line: class_node.end_position().row + 1,
                             code: class_node
                                 .utf8_text(&source_code)
                                 .unwrap_or("")
@@ -254,7 +275,7 @@ impl Parser {
                 }
             }
         }
-        self.db.index(&nodes);
+        self.db.index(&nodes)?;
         
         Ok(())
     }
@@ -284,9 +305,9 @@ impl Parser {
         return self.db.query(stmt);
     }
     
-    pub fn clean(&self) {}
-    
-    pub fn search(&self) {}
+    pub fn clean(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        return self.db.clean();
+    }
 }
 
 /// Configuration options struct for controlling directory traversal behavior
@@ -510,17 +531,21 @@ mod tests {
     #[test]
     fn test_traverse_directory_with_tree_sitter() {
         // Create test file
-        //let test_dir = "/Users/russellluo/Projects/work/opencsg/projects/crmaestro/codegpt";
-        let repo_path= "/Users/russellluo/Projects/work/opencsg/projects/crmaestro/codegpt";
-        let test_dir = "/Users/russellluo/Projects/work/opencsg/projects/crmaestro/codegpt/apps/platforms/billings.py";
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let repo_dir = PathBuf::from(manifest_dir).join("examples").join("python");
+        let code_dir = repo_dir.join("d.py");
 
         let mut parser = Parser::new("./graph/db");
-        let result = parser.index(repo_path, test_dir);
-        
-        let nodes = parser.query("MATCH (n) RETURN *;");
-        for node in nodes {
-            println!("Node: {:?}", node);
+        if let (Some(repo_dir), Some(code_dir)) = (repo_dir.to_str(), code_dir.to_str()) {
+            let result = parser.index(repo_dir, code_dir);
+            
+            let nodes = parser.query("MATCH (n) RETURN *;");
+            for node in nodes.unwrap() {
+                //println!("Node: {:?}", node);
+            }
         }
+        
+        //let _ = parser.clean();
     }
 
     /*

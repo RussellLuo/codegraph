@@ -1,3 +1,3 @@
-# `@codenav/codenav-win32-arm64-msvc`
+# `@codegraph/codegraph-win32-arm64-msvc`
 
-This is the **aarch64-pc-windows-msvc** binary for `@codenav/codenav`
+This is the **aarch64-pc-windows-msvc** binary for `@codegraph/codegraph`

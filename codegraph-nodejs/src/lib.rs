@@ -57,7 +57,7 @@ impl CodeGraph {
     //
     // ```javascript
     // import * as codegraph from '@codegraph/codegraph'
-    // let graph = new CodeGraph('./graph/db');
+    // let graph = new codegraph.CodeGraph('./graph/db');
     // ```
     #[napi(constructor)]
     pub fn new(db_path: String) -> Self {
@@ -74,6 +74,7 @@ impl CodeGraph {
 
     #[napi]
     pub fn clean(&mut self, delete: bool) -> napi::Result<()> {
+        self.parser.clean();
         Ok(())
     }
 

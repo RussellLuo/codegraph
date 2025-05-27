@@ -5,9 +5,9 @@ __metadata:
   version: 8
   cacheKey: 10c0
 
-"@codenav/codenav@workspace:.":
+"@codegraph/codegraph@workspace:.":
   version: 0.0.0-use.local
-  resolution: "@codenav/codenav@workspace:."
+  resolution: "@codegraph/codegraph@workspace:."
   dependencies:
     "@napi-rs/cli": "npm:^2.18.4"
     "@swc-node/register": "npm:^1.10.6"

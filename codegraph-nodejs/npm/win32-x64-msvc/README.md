@@ -1,3 +1,3 @@
-# `@codenav/codenav-win32-x64-msvc`
+# `@codegraph/codegraph-win32-x64-msvc`
 
-This is the **x86_64-pc-windows-msvc** binary for `@codenav/codenav`
+This is the **x86_64-pc-windows-msvc** binary for `@codegraph/codegraph`

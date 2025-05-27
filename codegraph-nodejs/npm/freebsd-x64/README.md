@@ -1,3 +1,3 @@
-# `@codenav/codenav-freebsd-x64`
+# `@codegraph/codegraph-freebsd-x64`
 
-This is the **x86_64-unknown-freebsd** binary for `@codenav/codenav`
+This is the **x86_64-unknown-freebsd** binary for `@codegraph/codegraph`

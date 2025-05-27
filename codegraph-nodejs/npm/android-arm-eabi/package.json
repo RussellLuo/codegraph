@@ -1,5 +1,5 @@
 {
-  "name": "@codenav/codenav-android-arm-eabi",
+  "name": "@codegraph/codegraph-android-arm-eabi",
   "version": "0.0.2",
   "os": [
     "android"
@@ -7,14 +7,14 @@
   "cpu": [
     "arm"
   ],
-  "main": "codenav.android-arm-eabi.node",
+  "main": "codegraph.android-arm-eabi.node",
   "files": [
-    "codenav.android-arm-eabi.node"
+    "codegraph.android-arm-eabi.node"
   ],
-  "description": "Node.js bindings for CodeNav.",
+  "description": "Node.js bindings for codegraph.",
   "license": "MIT",
   "engines": {
     "node": ">= 10"
   },
-  "repository": "https://github.com/RussellLuo/codenav"
+  "repository": "https://github.com/RussellLuo/codegraph"
 }

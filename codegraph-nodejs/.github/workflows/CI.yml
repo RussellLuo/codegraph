@@ -1,8 +1,8 @@
 name: Nodejs
 
 env:
-  APP_NAME: codenav
-  CUSTOM_WORKSPACE: ${{ github.workspace }}/codenav-nodejs
+  APP_NAME: codegraph
+  CUSTOM_WORKSPACE: ${{ github.workspace }}/codegraph-nodejs
 
 permissions:
   contents: write
@@ -16,7 +16,7 @@ on:
   pull_request:
     paths:
       - src/**
-      - codenav-nodejs/**
+      - codegraph-nodejs/**
       - .github/workflows/nodejs.yml
 jobs:
   build:
@@ -83,7 +83,7 @@ jobs:
     runs-on: ${{ matrix.settings.host }}
     defaults:
       run:
-        working-directory: codenav-nodejs
+        working-directory: codegraph-nodejs
     steps:
       - uses: actions/checkout@v4
       - name: Setup node
@@ -92,7 +92,7 @@ jobs:
         with:
           node-version: 20
           cache: yarn
-          cache-dependency-path: codenav-nodejs/yarn.lock
+          cache-dependency-path: codegraph-nodejs/yarn.lock
       - name: Install
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
@@ -130,14 +130,14 @@ jobs:
           node-version: 20
           cache: yarn
           architecture: x86
-          cache-dependency-path: codenav-nodejs/yarn.lock
+          cache-dependency-path: codegraph-nodejs/yarn.lock
       - name: Build in docker
         uses: addnab/docker-run-action@v3
         if: ${{ matrix.settings.docker }}
         with:
           image: ${{ matrix.settings.docker }}
           options: '--user 0:0 -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build'
-          run: cd /build/codenav-nodejs && ${{ matrix.settings.build }}
+          run: cd /build/codegraph-nodejs && ${{ matrix.settings.build }}
       - name: Build
         run: ${{ matrix.settings.build }}
         if: ${{ !matrix.settings.docker }}
@@ -146,14 +146,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.settings.target }}
-          path: codenav-nodejs/${{ env.APP_NAME }}.*.node
+          path: codegraph-nodejs/${{ env.APP_NAME }}.*.node
           if-no-files-found: error
   build-freebsd:
     runs-on: ubuntu-latest
     name: Build FreeBSD
     defaults:
       run:
-        working-directory: codenav-nodejs
+        working-directory: codegraph-nodejs
     steps:
       - uses: actions/checkout@v4
       - name: Build
@@ -170,7 +170,7 @@ jobs:
           environment_variables: 'DEBUG RUSTUP_IO_THREADS'
           shell: bash
           run: |
-            cd codenav-nodejs
+            cd codegraph-nodejs
             sudo pkg install -y -f curl node libnghttp2 npm
             sudo npm install -g yarn --ignore-scripts
             curl https://sh.rustup.rs -sSf --output rustup.sh
@@ -196,7 +196,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-freebsd
-          path: codenav-nodejs/${{ env.APP_NAME }}.*.node
+          path: codegraph-nodejs/${{ env.APP_NAME }}.*.node
           if-no-files-found: error
   test-macOS-windows-binding:
     name: Test bindings on ${{ matrix.settings.target }} - node@${{ matrix.node }}
@@ -209,7 +209,7 @@ jobs:
           - host: macos-latest
             target: x86_64-apple-darwin
           # There are some issues with stack-graphs on Windows.
-          # see https://github.com/RussellLuo/codenav/actions/runs/10915527605/job/30295604917
+          # see https://github.com/RussellLuo/codegraph/actions/runs/10915527605/job/30295604917
           #- host: windows-latest
           #  target: x86_64-pc-windows-msvc
         node:
@@ -218,7 +218,7 @@ jobs:
     runs-on: ${{ matrix.settings.host }}
     defaults:
       run:
-        working-directory: codenav-nodejs
+        working-directory: codegraph-nodejs
     steps:
       - uses: actions/checkout@v4
       - name: Setup node
@@ -227,14 +227,14 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: yarn
           architecture: x64
-          cache-dependency-path: codenav-nodejs/yarn.lock
+          cache-dependency-path: codegraph-nodejs/yarn.lock
       - name: Install dependencies
         run: yarn install
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           name: bindings-${{ matrix.settings.target }}
-          path: codenav-nodejs
+          path: codegraph-nodejs
       - name: List packages
         run: ls -R .
         shell: bash
@@ -253,7 +253,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: codenav-nodejs
+        working-directory: codegraph-nodejs
     steps:
       - uses: actions/checkout@v4
       - name: Setup node
@@ -261,19 +261,19 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: yarn
-          cache-dependency-path: codenav-nodejs/yarn.lock
+          cache-dependency-path: codegraph-nodejs/yarn.lock
       - name: Install dependencies
         run: yarn install
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           name: bindings-x86_64-unknown-linux-gnu
-          path: codenav-nodejs
+          path: codegraph-nodejs
       - name: List packages
         run: ls -R .
         shell: bash
       - name: Test bindings
-        run: docker run --rm -v ${{ github.workspace }}:/build -w /build node:${{ matrix.node }}-slim /bin/sh -c "cd /build/codenav-nodejs && yarn test"
+        run: docker run --rm -v ${{ github.workspace }}:/build -w /build node:${{ matrix.node }}-slim /bin/sh -c "cd /build/codegraph-nodejs && yarn test"
   test-linux-x64-musl-binding:
     name: Test bindings on x86_64-unknown-linux-musl - node@${{ matrix.node }}
     needs:
@@ -287,7 +287,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: codenav-nodejs
+        working-directory: codegraph-nodejs
     steps:
       - uses: actions/checkout@v4
       - name: Setup node
@@ -295,7 +295,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: yarn
-          cache-dependency-path: codenav-nodejs/yarn.lock
+          cache-dependency-path: codegraph-nodejs/yarn.lock
       - name: Install dependencies
         run: |
           yarn config set supportedArchitectures.libc "musl"
@@ -304,12 +304,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: bindings-x86_64-unknown-linux-musl
-          path: codenav-nodejs
+          path: codegraph-nodejs
       - name: List packages
         run: ls -R .
         shell: bash
       - name: Test bindings
-        run: docker run --rm -v ${{ github.workspace }}:/build -w /build node:${{ matrix.node }}-alpine /bin/sh -c "cd /build/codenav-nodejs && yarn test"
+        run: docker run --rm -v ${{ github.workspace }}:/build -w /build node:${{ matrix.node }}-alpine /bin/sh -c "cd /build/codegraph-nodejs && yarn test"
   test-linux-aarch64-gnu-binding:
     name: Test bindings on aarch64-unknown-linux-gnu - node@${{ matrix.node }}
     needs:
@@ -323,14 +323,14 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: codenav-nodejs
+        working-directory: codegraph-nodejs
     steps:
       - uses: actions/checkout@v4
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           name: bindings-aarch64-unknown-linux-gnu
-          path: codenav-nodejs
+          path: codegraph-nodejs
       - name: List packages
         run: ls -R .
         shell: bash
@@ -350,7 +350,7 @@ jobs:
           image: node:${{ matrix.node }}-slim
           options: '--platform linux/arm64 -v ${{ github.workspace }}:/build -w /build'
           run: |
-            cd /build/codenav-nodejs
+            cd /build/codegraph-nodejs
             set -e
             yarn test
             ls -la
@@ -361,14 +361,14 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: codenav-nodejs
+        working-directory: codegraph-nodejs
     steps:
       - uses: actions/checkout@v4
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           name: bindings-aarch64-unknown-linux-musl
-          path: codenav-nodejs
+          path: codegraph-nodejs
       - name: List packages
         run: ls -R .
         shell: bash
@@ -388,7 +388,7 @@ jobs:
           image: node:lts-alpine
           options: '--platform linux/arm64 -v ${{ github.workspace }}:/build -w /build'
           run: |
-            cd /build/codenav-nodejs
+            cd /build/codegraph-nodejs
             set -e
             yarn test
   test-linux-arm-gnueabihf-binding:
@@ -404,14 +404,14 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: codenav-nodejs
+        working-directory: codegraph-nodejs
     steps:
       - uses: actions/checkout@v4
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           name: bindings-armv7-unknown-linux-gnueabihf
-          path: codenav-nodejs
+          path: codegraph-nodejs
       - name: List packages
         run: ls -R .
         shell: bash
@@ -430,7 +430,7 @@ jobs:
           image: node:${{ matrix.node }}-bullseye-slim
           options: '--platform linux/arm/v7 -v ${{ github.workspace }}:/build -w /build'
           run: |
-            cd /build/codenav-nodejs
+            cd /build/codegraph-nodejs
             set -e
             yarn test
             ls -la
@@ -441,7 +441,7 @@ jobs:
     runs-on: macos-latest
     defaults:
       run:
-        working-directory: codenav-nodejs
+        working-directory: codegraph-nodejs
     steps:
       - uses: actions/checkout@v4
       - name: Setup node
@@ -449,26 +449,26 @@ jobs:
         with:
           node-version: 20
           cache: yarn
-          cache-dependency-path: codenav-nodejs/yarn.lock
+          cache-dependency-path: codegraph-nodejs/yarn.lock
       - name: Install dependencies
         run: yarn install
       - name: Download macOS x64 artifact
         uses: actions/download-artifact@v4
         with:
           name: bindings-x86_64-apple-darwin
-          path: codenav-nodejs/artifacts
+          path: codegraph-nodejs/artifacts
       - name: Download macOS arm64 artifact
         uses: actions/download-artifact@v4
         with:
           name: bindings-aarch64-apple-darwin
-          path: codenav-nodejs/artifacts
+          path: codegraph-nodejs/artifacts
       - name: Combine binaries
         run: yarn universal
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bindings-universal-apple-darwin
-          path: codenav-nodejs/${{ env.APP_NAME }}.*.node
+          path: codegraph-nodejs/${{ env.APP_NAME }}.*.node
           if-no-files-found: error
 
   check-release:
@@ -498,7 +498,7 @@ jobs:
     if: needs.check-release.outputs.release == 'true'
     defaults:
       run:
-        working-directory: codenav-nodejs
+        working-directory: codegraph-nodejs
     needs:
       - build-freebsd
       - test-macOS-windows-binding
@@ -517,14 +517,14 @@ jobs:
           # "version" in package.json will be bumped by `npm version patch`
           filters: |
             nodejs:
-              - 'codenav-nodejs/package.json'
+              - 'codegraph-nodejs/package.json'
       - name: Setup node
         uses: actions/setup-node@v4
         if: steps.filter.outputs.nodejs == 'true'
         with:
           node-version: 20
           cache: yarn
-          cache-dependency-path: codenav-nodejs/yarn.lock
+          cache-dependency-path: codegraph-nodejs/yarn.lock
       - name: Install dependencies
         if: steps.filter.outputs.nodejs == 'true'
         run: yarn install
@@ -532,7 +532,7 @@ jobs:
         if: steps.filter.outputs.nodejs == 'true'
         uses: actions/download-artifact@v4
         with:
-          path: codenav-nodejs/artifacts
+          path: codegraph-nodejs/artifacts
       - name: Move artifacts
         if: steps.filter.outputs.nodejs == 'true'
         run: yarn artifacts --dir artifacts --dist npm
