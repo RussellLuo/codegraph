@@ -44,12 +44,12 @@ impl From<codegraph::Node> for Node {
 }
 
 #[napi]
-pub struct CodeGraph {
+pub struct Parser {
     parser: codegraph::Parser,
 }
 
 #[napi]
-impl CodeGraph {
+impl Parser {
     // Args:
     // db_path: Path of the indexing database to use.
     //
@@ -57,31 +57,19 @@ impl CodeGraph {
     //
     // ```javascript
     // import * as codegraph from '@codegraph/codegraph'
-    // let graph = new codegraph.CodeGraph('./graph/db');
+    // let graph = new codegraph.Parser();
     // ```
     #[napi(constructor)]
-    pub fn new(db_path: String) -> Self {
+    pub fn new() -> Self {
         Self {
-            parser: codegraph::Parser::new(db_path.as_str()),
+            parser: codegraph::Parser::new(),
         }
     }
 
     #[napi]
-    pub fn index(&mut self, repo_path: String, source_path: String) -> napi::Result<()> {
-        self.parser.index(repo_path.as_str(), source_path.as_str());
-        Ok(())
-    }
-
-    #[napi]
-    pub fn clean(&mut self, delete: bool) -> napi::Result<()> {
-        self.parser.clean();
-        Ok(())
-    }
-
-    #[napi]
-    pub fn query(&mut self, stmt: String) -> napi::Result<Vec<Node>> {
-        let nodes = self.parser.query(stmt.as_str()).unwrap();
-        let py_nodes = nodes
+    pub fn parse(&mut self, repo_path: String, source_path: String) -> napi::Result<Vec<Node>> {
+        let nodes = self.parser.parse(repo_path.as_str(), source_path.as_str());
+        let py_nodes = nodes.unwrap()
             .into_iter()
             .map(|n| Node::from(n))
             .collect::<Vec<_>>();

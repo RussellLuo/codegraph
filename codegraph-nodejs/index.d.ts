@@ -18,9 +18,7 @@ export declare class Node {
   /** The code text */
   code: string
 }
-export declare class CodeGraph {
-  constructor(dbPath: string)
-  index(repoPath: string, sourcePath: string): void
-  clean(delete: boolean): void
-  query(stmt: string): Array<Node>
+export declare class Parser {
+  constructor()
+  parse(repoPath: string, sourcePath: string): Array<Node>
 }

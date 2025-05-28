@@ -1,23 +1,17 @@
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::CommandEnvs;
 use glob::Pattern;
 use walkdir::WalkDir;
 use tree_sitter;
 use tree_sitter::StreamingIterator;
 use tree_sitter_python;
 use tree_sitter_go;
-use kuzu;
 use strum_macros;
 
 /// The tree-sitter definition query source for different languages.
 pub const PYTHON_DEFINITIONS_QUERY_SOURCE: &str = include_str!("python/definitions.scm");
 pub const GO_DEFINITIONS_QUERY_SOURCE: &str = include_str!("go/definitions.scm");
-
-
-// The database schema.
-pub const CREATE_DATABASE_SCHEMA: &str = include_str!("schema.cypher");
 
 #[derive(Debug, Clone, strum_macros::EnumString, strum_macros::Display)]
 pub enum NodeType{
@@ -63,148 +57,33 @@ pub struct Node {
     pub code: String,
 }
 
-pub struct Database {
-    db_path: PathBuf,
-    initialized: bool,
-    db: Option<kuzu::Database>,
-}
-
-impl Database {
-    pub fn new(db_path: &str) -> Self {
-        Self {
-            initialized: false,
-            db_path: PathBuf::from(&db_path),
-            db: None,
-        }
-    }
-    
-    pub fn index(&mut self, nodes: &Vec<Node>) -> Result<(), Box<dyn std::error::Error>> {
-        // 初始化数据库（如果还未初始化）
-        if !self.initialized {
-            let db = kuzu::Database::new(&self.db_path, kuzu::SystemConfig::default())?;
-            self.db = Some(db);
-            
-            // 创建连接并初始化数据库模式
-            if let Some(db) = &self.db {
-                let conn = kuzu::Connection::new(db)?;
-                conn.query(CREATE_DATABASE_SCHEMA);
-            }
-            
-            self.initialized = true;
-        }
-
-        // 每次需要连接时创建新的连接，避免生命周期问题
-        if let Some(db) = &self.db {
-            let conn = kuzu::Connection::new(db)?;
-
-            for node in nodes {
-                let table_name = to_title_case(node.typ.to_string().as_str());
-                let data = format!(
-                    "name: {}, type: {}, start_line: {}, end_line: {}, code: {}",
-                    repr_string(node.name.as_str()),
-                    repr_string(node.typ.to_string().as_str()),
-                    node.start_line,
-                    node.end_line,
-                    repr_string(node.code.as_str()),
-                );
-                conn.query(format!("MERGE (n:{} {{ {} }}) RETURN n.*;", table_name, data).as_str())?;
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn query(&mut self, stmt: &str) -> Result<Vec<Node>, Box<dyn std::error::Error>> {
-        let mut nodes: Vec<Node> = vec![];
-
-        if let Some(db) = &self.db {
-            let conn = kuzu::Connection::new(db)?;
-            let mut result = conn.query(stmt)?;
-            for row in result {
-                match &row[0] {
-                    kuzu::Value::Node(node) => {
-                        let props= node.get_properties();
-                        let mut node = Node{
-                            name: String::from(""),
-                            typ: NodeType::UNPARSED,
-                            code: String::from(""),
-                            start_line: 0,
-                            end_line: 0,
-                        };
-                        if let kuzu::Value::String(name) = &props[0].1 {
-                            node.name = name.to_string();
-                        }
-                        if let kuzu::Value::String(typ) = &props[1].1 {
-                            node.typ = typ.parse().unwrap();
-                        }
-                        if let kuzu::Value::String(code) = &props[3].1 {
-                            node.code = code.to_string();
-                        }
-                        if let kuzu::Value::UInt32(line) = &props[4].1 {
-                            node.start_line = *line as usize;
-                        }
-                        if let kuzu::Value::UInt32(line) = &props[5].1 {
-                            node.end_line = *line as usize;
-                        }
-                        nodes.push(node);
-                    },
-                    _ => println!("Unrecoginized node type"),
-                }
-            }
-        }
-        Ok(nodes)
-    }
-    
-    
-    pub fn clean(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(db) = &self.db {
-            let conn = kuzu::Connection::new(db)?;
-            // Delete all records
-            let _ = conn.query("MATCH (n) DETACH DELETE n;")?;
-        }
-        Ok(())
-    }
-}
-
-fn repr_string(s: &str) -> String {
-    // 添加引号，同时保留原始字符串内容
-    format!("{:?}", s)
-        .replace("\\n", "\n") // 把转义的 \n 替换回实际换行符
-        .replace("\\t", "\t") // 同样处理制表符
-        .replace("\\r", "\r") // 同样处理回车符
-}
-
-fn to_title_case(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut capitalize_next = true;
-
-    for c in s.chars() {
-        if c.is_whitespace() || c.is_ascii_punctuation() {
-            result.push(c);
-            capitalize_next = true;
-        } else if capitalize_next {
-            result.extend(c.to_uppercase());
-            capitalize_next = false;
-        } else {
-            result.extend(c.to_lowercase());
-        }
-    }
-
-    result
-}
-
-pub struct Parser {
-    db: Database,
-}
+pub struct Parser {}
 
 impl Parser {
-    pub fn new(db_path: &str) -> Self {
-        Self {
-            db: Database::new(db_path),
-        }
+    pub fn new() -> Self {
+        Parser {}
+    }
+    pub fn parse(&mut self, repo_path: &str, dir_path: &str) -> Result<Vec<Node>, Box<dyn std::error::Error>> {
+        // 遍历目录并启用.gitignore
+        let mut options = TraverseOptions::default();
+        options.ignore_patterns = vec![];
+        options.use_gitignore_files = true;
+
+        let mut nodes: Vec<Node> = Vec::new();
+        let result = traverse_directory(dir_path, options, |path| {
+            // 处理 path.to_str() 返回的 Option<&str> 类型
+            if let Some(path_str) = path.to_str() {
+                let parsed_nodes = self._parse(repo_path,  path_str, "");
+                nodes.extend(parsed_nodes.unwrap());
+            } else {
+                eprintln!("警告: 无法将路径转换为字符串: {:?}", path);
+            }
+        });
+
+        Ok(nodes)
     }
 
-    pub fn parse(&mut self, repo_path: &str, file_path: &str, query_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn _parse(&mut self, repo_path: &str, file_path: &str, query_path: &str) -> Result<Vec<Node>, Box<dyn std::error::Error>> {
         let snippet_language = Language::from(file_path);
         let query_source = if query_path.is_empty() {
             match snippet_language {
@@ -275,38 +154,8 @@ impl Parser {
                 }
             }
         }
-        self.db.index(&nodes)?;
         
-        Ok(())
-    }
-
-    pub fn index(&mut self, repo_path: &str, dir_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-        // 遍历目录并启用.gitignore
-        let mut options = TraverseOptions::default();
-        options.ignore_patterns = vec![];
-        options.use_gitignore_files = true;
-        
-        let result = traverse_directory(dir_path, options, |path| {
-            // 处理 path.to_str() 返回的 Option<&str> 类型
-            if let Some(path_str) = path.to_str() {
-                let nodes = self.parse(repo_path,  path_str, "");
-                for node in nodes {
-                    //println!("Node: {:?}", node);
-                }
-            } else {
-                eprintln!("警告: 无法将路径转换为字符串: {:?}", path);
-            }
-        });
-
-        Ok(())
-    }
-    
-    pub fn query(&mut self, stmt: &str) -> Result<Vec<Node>, Box<dyn std::error::Error>> {
-        return self.db.query(stmt);
-    }
-    
-    pub fn clean(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        return self.db.clean();
+        Ok(nodes)
     }
 }
 
@@ -529,23 +378,19 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     #[test]
-    fn test_traverse_directory_with_tree_sitter() {
+    fn test_parse() {
         // Create test file
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let repo_dir = PathBuf::from(manifest_dir).join("examples").join("python");
         let code_dir = repo_dir.join("d.py");
 
-        let mut parser = Parser::new("./graph/db");
+        let mut parser = Parser::new();
         if let (Some(repo_dir), Some(code_dir)) = (repo_dir.to_str(), code_dir.to_str()) {
-            let result = parser.index(repo_dir, code_dir);
-            
-            let nodes = parser.query("MATCH (n) RETURN *;");
+            let nodes = parser.parse(repo_dir, code_dir);
             for node in nodes.unwrap() {
-                //println!("Node: {:?}", node);
+                println!("Node: {:?}", node);
             }
         }
-        
-        //let _ = parser.clean();
     }
 
     /*
