@@ -7,7 +7,7 @@ const CODE_DIR = path.join(REPO_DIR, 'd.py');
 import * as codegraph from '../index.js';
 const parser = new codegraph.Parser();
 
-test('resloving references', (t) => {
+test('parsing nodes', (t) => {
   const nodes = parser.parse(REPO_DIR, CODE_DIR);
 
   let defs: string[] = [];
