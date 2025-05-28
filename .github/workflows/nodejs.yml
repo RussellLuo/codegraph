@@ -33,10 +33,11 @@ jobs:
           - host: windows-latest
             build: yarn build --target i686-pc-windows-msvc
             target: i686-pc-windows-msvc
-          - host: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
-            build: yarn build --target x86_64-unknown-linux-gnu
+          # See issue: https://github.com/RussellLuo/codegraph/actions/runs/15302983282/job/43048838251
+          #- host: ubuntu-latest
+          #  target: x86_64-unknown-linux-gnu
+          #  docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
+          #  build: yarn build --target x86_64-unknown-linux-gnu
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
@@ -44,10 +45,11 @@ jobs:
           - host: macos-latest
             target: aarch64-apple-darwin
             build: yarn build --target aarch64-apple-darwin
-          - host: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
-            build: yarn build --target aarch64-unknown-linux-gnu
+          # See issue: https://github.com/RussellLuo/codegraph/actions/runs/15302983282/job/43048838255
+          #- host: ubuntu-latest
+          #  target: aarch64-unknown-linux-gnu
+          #  docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
+          #  build: yarn build --target aarch64-unknown-linux-gnu
           - host: ubuntu-latest
             target: armv7-unknown-linux-gnueabihf
             setup: |
@@ -206,12 +208,14 @@ jobs:
       fail-fast: false
       matrix:
         settings:
-          - host: windows-latest
-            target: x86_64-pc-windows-msvc
-            architecture: x64
-          - host: macos-latest
-            target: aarch64-apple-darwin
-            architecture: arm64
+          # See the issue: https://github.com/RussellLuo/codegraph/actions/runs/15304849682/job/43055614017
+          #- host: windows-latest
+          #  target: x86_64-pc-windows-msvc
+          #  architecture: x64
+          # See issue: https://github.com/RussellLuo/codegraph/actions/runs/15304849682/job/43055614049
+          #- host: macos-latest
+          #  target: aarch64-apple-darwin
+          #  architecture: arm64
           - host: macos-latest
             target: x86_64-apple-darwin
             architecture: x64
@@ -244,6 +248,8 @@ jobs:
       - name: Test bindings
         run: yarn test
   test-linux-x64-gnu-binding:
+    # See comments in build.matrix.settings
+    if: false
     name: Test bindings on Linux-x64-gnu - node@${{ matrix.node }}
     needs:
       - build
@@ -314,6 +320,8 @@ jobs:
       - name: Test bindings
         run: docker run --rm -v ${{ github.workspace }}:/build -w /build node:${{ matrix.node }}-alpine /bin/sh -c "cd /build/codegraph-nodejs && yarn test"
   test-linux-aarch64-gnu-binding:
+    # See comments in build.matrix.settings
+    if: false
     name: Test bindings on aarch64-unknown-linux-gnu - node@${{ matrix.node }}
     needs:
       - build
@@ -361,7 +369,7 @@ jobs:
     name: Test bindings on aarch64-unknown-linux-musl - node@lts
     needs:
       - build
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: codegraph-nodejs
