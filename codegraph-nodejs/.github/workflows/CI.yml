@@ -1,18 +1,16 @@
 name: Nodejs
-
 env:
   APP_NAME: codegraph
   CUSTOM_WORKSPACE: ${{ github.workspace }}/codegraph-nodejs
-
 permissions:
   contents: write
   id-token: write
-on:
+'on':
   push:
     branches:
       - main
     tags:
-      - 'v*'
+      - v*
   pull_request:
     paths:
       - src/**
@@ -167,7 +165,7 @@ jobs:
           version: '14.0'
           memory: 8G
           cpu_count: 3
-          environment_variables: 'DEBUG RUSTUP_IO_THREADS'
+          environment_variables: DEBUG RUSTUP_IO_THREADS
           shell: bash
           run: |
             cd codegraph-nodejs
@@ -208,12 +206,7 @@ jobs:
         settings:
           - host: macos-latest
             target: x86_64-apple-darwin
-          # There are some issues with stack-graphs on Windows.
-          # see https://github.com/RussellLuo/codegraph/actions/runs/10915527605/job/30295604917
-          #- host: windows-latest
-          #  target: x86_64-pc-windows-msvc
         node:
-          # - '18'
           - '20'
     runs-on: ${{ matrix.settings.host }}
     defaults:
@@ -248,7 +241,6 @@ jobs:
       fail-fast: false
       matrix:
         node:
-          # - '18'
           - '20'
     runs-on: ubuntu-latest
     defaults:
@@ -282,7 +274,6 @@ jobs:
       fail-fast: false
       matrix:
         node:
-          # - '18'
           - '20'
     runs-on: ubuntu-latest
     defaults:
@@ -318,7 +309,6 @@ jobs:
       fail-fast: false
       matrix:
         node:
-          # - '18'
           - '20'
     runs-on: ubuntu-latest
     defaults:
@@ -399,7 +389,6 @@ jobs:
       fail-fast: false
       matrix:
         node:
-          # - '18'
           - '20'
     runs-on: ubuntu-latest
     defaults:
@@ -470,28 +459,24 @@ jobs:
           name: bindings-universal-apple-darwin
           path: codegraph-nodejs/${{ env.APP_NAME }}.*.node
           if-no-files-found: error
-
   check-release:
     runs-on: ubuntu-latest
     outputs:
       release: ${{ steps.check-release-commit.outputs.release }}
     steps:
-    - uses: actions/checkout@v4
-      with:
-        # See https://github.com/actions/checkout#Checkout-pull-request-HEAD-commit-instead-of-merge-commit
-        # and https://github.com/actions/checkout/issues/426
-        ref: ${{ github.event.pull_request.head.sha }}
-    - name: Check if it's a release commit
-      id: check-release-commit
-      run: |
-        commit_message=$(git log --format=%B -n 1)
-        echo "Commit message: '$commit_message'"
-        if [[ "$commit_message" =~ ^Release\ v[0-9]+(\.[0-9]+)* ]]; then
-          echo "::set-output name=release::true"
-        else
-          echo "::set-output name=release::false"
-        fi
-
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Check if it's a release commit
+        id: check-release-commit
+        run: |
+          commit_message=$(git log --format=%B -n 1)
+          echo "Commit message: '$commit_message'"
+          if [[ "$commit_message" =~ ^Release\ v[0-9]+(\.[0-9]+)* ]]; then
+            echo "::set-output name=release::true"
+          else
+            echo "::set-output name=release::false"
+          fi
   publish:
     name: Publish
     runs-on: ubuntu-latest
@@ -514,7 +499,6 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
-          # "version" in package.json will be bumped by `npm version patch`
           filters: |
             nodejs:
               - 'codegraph-nodejs/package.json'

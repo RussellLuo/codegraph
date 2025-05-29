@@ -1,3 +1,3 @@
-# `@codegraph/codegraph-linux-arm-musleabihf`
+# `@codegraph-js/codegraph-linux-arm-musleabihf`
 
-This is the **armv7-unknown-linux-musleabihf** binary for `@codegraph/codegraph`
+This is the **armv7-unknown-linux-musleabihf** binary for `@codegraph-js/codegraph`

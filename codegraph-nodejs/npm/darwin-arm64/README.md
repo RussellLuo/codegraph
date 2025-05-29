@@ -1,3 +1,3 @@
-# `@codegraph/codegraph-darwin-arm64`
+# `@codegraph-js/codegraph-darwin-arm64`
 
-This is the **aarch64-apple-darwin** binary for `@codegraph/codegraph`
+This is the **aarch64-apple-darwin** binary for `@codegraph-js/codegraph`

@@ -56,7 +56,7 @@ impl Parser {
     // Example:
     //
     // ```javascript
-    // import * as codegraph from '@codegraph/codegraph'
+    // import * as codegraph from '@codegraph-js/codegraph'
     // let graph = new codegraph.Parser();
     // ```
     #[napi(constructor)]

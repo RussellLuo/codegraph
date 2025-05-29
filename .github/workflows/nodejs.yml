@@ -526,7 +526,7 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
-          # "version" in package.json will be bumped by `npm version patch`
+          # "version" in package.json will be changed by `npm version patch` or `npm version <newversino>`
           filters: |
             nodejs:
               - 'codegraph-nodejs/package.json'

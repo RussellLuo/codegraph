@@ -1,3 +1,3 @@
-# `@codegraph/codegraph-linux-x64-gnu`
+# `@codegraph-js/codegraph-linux-x64-gnu`
 
-This is the **x86_64-unknown-linux-gnu** binary for `@codegraph/codegraph`
+This is the **x86_64-unknown-linux-gnu** binary for `@codegraph-js/codegraph`

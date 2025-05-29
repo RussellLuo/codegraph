@@ -1,6 +1,6 @@
 {
-  "name": "@codegraph/codegraph-darwin-universal",
-  "version": "0.0.2",
+  "name": "@codegraph-js/codegraph-darwin-universal",
+  "version": "0.0.1-beta.0",
   "os": [
     "darwin"
   ],
@@ -8,7 +8,6 @@
   "files": [
     "codegraph.darwin-universal.node"
   ],
-  "description": "Node.js bindings for codegraph.",
   "license": "MIT",
   "engines": {
     "node": ">= 10"

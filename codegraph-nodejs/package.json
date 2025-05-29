@@ -1,6 +1,6 @@
 {
-  "name": "@codegraph/codegraph",
-  "version": "0.0.2",
+  "name": "@codegraph-js/codegraph",
+  "version": "0.0.1-beta.0",
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {

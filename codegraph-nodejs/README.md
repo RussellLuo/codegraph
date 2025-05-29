@@ -6,7 +6,7 @@ Node.js bindings for CodeGraph.
 ## Installation
 
 ```bash
-npm install @codegraph/codegraph
+npm install @codegraph-js/codegraph
 ```
 
 
@@ -29,6 +29,18 @@ Install [napi-rs][1]:
 
 ```bash
 npm install -g @napi-rs/cli
+```
+
+Rename the package:
+
+```bash
+napi rename -n @org/pkg
+```
+
+Change the version:
+
+```bash
+npm version <newversion>
 ```
 
 Build the native package:
