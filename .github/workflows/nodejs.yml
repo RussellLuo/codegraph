@@ -483,6 +483,7 @@ jobs:
           if-no-files-found: error
 
   check-release:
+    if: false
     runs-on: ubuntu-latest
     outputs:
       release: ${{ steps.check-release-commit.outputs.release }}
@@ -497,7 +498,7 @@ jobs:
       run: |
         commit_message=$(git log --format=%B -n 1)
         echo "Commit message: '$commit_message'"
-        if [[ "$commit_message" =~ ^Release\ v[0-9]+(\.[0-9]+)* ]]; then
+        if [[ "$commit_message" =~ ^Bump version to\ [0-9]+(\.[0-9]+)* ]]; then
           echo "::set-output name=release::true"
         else
           echo "::set-output name=release::false"
@@ -506,7 +507,7 @@ jobs:
   publish:
     name: Publish
     runs-on: ubuntu-latest
-    if: needs.check-release.outputs.release == 'true'
+    if: github.ref_type == 'tag'
     defaults:
       run:
         working-directory: codegraph-nodejs
@@ -519,7 +520,7 @@ jobs:
       - test-linux-aarch64-musl-binding
       - test-linux-arm-gnueabihf-binding
       - universal-macOS
-      - check-release
+      #- check-release
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
