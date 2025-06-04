@@ -21,6 +21,7 @@ export interface Node {
   name: string
   shortNames: Array<string>
   type: NodeType
+  language: string
   /** Start line (0-based) */
   startLine: number
   /** End line (0-based) */

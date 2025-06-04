@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
+use std::thread;
+use std::time::Duration;
 use strum_macros;
 use tree_sitter;
 use tree_sitter::StreamingIterator;
@@ -41,16 +43,17 @@ pub enum EdgeType {
     References,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, strum_macros::Display, strum_macros::EnumString, serde::Serialize)]
 pub enum Language {
+    Text,
     Python,
     Go,
     // TypeScript,
     // JavaScript,
 }
 
-impl From<&str> for Language {
-    fn from(path: &str) -> Self {
+impl Language {
+    fn from_path(path: &str) -> Self {
         let ext = Path::new(path).extension().and_then(|e| e.to_str());
 
         match ext {
@@ -58,7 +61,7 @@ impl From<&str> for Language {
             Some("go") => Language::Go,
             // Some("ts") => Language::TypeScript,
             // Some("js") => Language::JavaScript,
-            _ => panic!("Unsupport extension: {:?}", ext),
+            _ => Language::Text,
         }
     }
 }
@@ -69,6 +72,8 @@ pub struct Node {
     pub name: String,
     // Node type
     pub r#type: NodeType,
+    // Language type
+    pub language: Language,
     /// Start line (0-based)
     pub start_line: usize,
     /// End line (0-based)
@@ -86,6 +91,13 @@ impl Node {
                 "Class" => NodeType::Class,
                 _ => NodeType::Unparsed, // 默认值
             },
+            language: data
+                .get("lanuage")
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap(),
             start_line: data.get("start_line").unwrap().as_u64().unwrap() as usize,
             end_line: data.get("end_line").unwrap().as_u64().unwrap() as usize,
             code: data
@@ -134,6 +146,10 @@ impl Node {
         dict.insert(
             "type".to_string(),
             serde_json::Value::String(self.r#type.to_string()),
+        );
+        dict.insert(
+            "language".to_string(),
+            serde_json::Value::String(self.language.to_string()),
         );
         dict.insert(
             "start_line".to_string(),
@@ -203,6 +219,7 @@ impl Relationship {
         let from_node = Node {
             name: String::new(),
             r#type: from_type,
+            language: Language::Text,
             start_line: 0,
             end_line: 0,
             code: String::new(),
@@ -211,6 +228,7 @@ impl Relationship {
         let to_node = Node {
             name: String::new(),
             r#type: to_type,
+            language: Language::Text,
             start_line: 0,
             end_line: 0,
             code: String::new(),
@@ -396,10 +414,12 @@ impl Parser {
             std::fs::create_dir_all(&rels_dir)?;
             self.write_nodes_to_json(&nodes, nodes_dir.to_str().unwrap())?;
             self.write_relationships_to_json(&self.relationships, rels_dir.to_str().unwrap())?;
-        }
 
-        // Return references to parsed nodes and relationships
-        Ok((nodes, self.relationships.clone()))
+            Ok((vec![], vec![]))
+        } else {
+            // Return references to parsed nodes and relationships
+            Ok((nodes, self.relationships.clone()))
+        }
     }
 
     /// Traverses all files and directories in the specified directory, creates Node and Relationship objects
@@ -474,6 +494,7 @@ impl Parser {
                 .to_string_lossy()
                 .to_string(),
             r#type: NodeType::Directory,
+            language: Language::Text,
             start_line: 0,
             end_line: 0,
             code: String::new(),
@@ -539,11 +560,14 @@ impl Parser {
                                 .to_string_lossy()
                                 .to_string(),
                             r#type: NodeType::Directory,
+                            language: Language::Text,
                             start_line: 0,
                             end_line: 0,
                             code: String::new(),
                         }
                     } else {
+                        let file_language =
+                            Language::from_path(entry_path.to_path_buf().to_str().unwrap());
                         let file_node = Node {
                             name: entry_path
                                 .strip_prefix(dir_path)
@@ -551,12 +575,29 @@ impl Parser {
                                 .to_string_lossy()
                                 .to_string(),
                             r#type: NodeType::File,
+                            language: file_language,
                             start_line: 0,
                             end_line: 0,
                             code: String::new(),
                         };
-                        // Parse the file using self.parse_file and add parsed nodes to the collection
-                        self.parse_file(&file_node, dir_path, &entry_path.to_path_buf(), "")?;
+                        // Parse the file and add parsed nodes to the collection
+                        match file_node.language {
+                            Language::Python => self.parse_python_file(
+                                &file_node,
+                                dir_path,
+                                &entry_path.to_path_buf(),
+                                "",
+                            )?,
+                            Language::Go => self.parse_go_file(
+                                &file_node,
+                                dir_path,
+                                &entry_path.to_path_buf(),
+                                "",
+                            )?,
+                            Language::Text => (),
+                        }
+
+                        thread::sleep(Duration::from_millis(1));
 
                         file_node
                     };
@@ -580,6 +621,7 @@ impl Parser {
                             let parent_node = Node {
                                 name: parent_path_str.clone(),
                                 r#type: NodeType::Directory,
+                                language: Language::Text,
                                 start_line: 0,
                                 end_line: 0,
                                 code: String::new(),
@@ -653,12 +695,12 @@ impl Parser {
             let json_content = serde_json::to_string_pretty(&type_nodes)?;
             // 写入文件
             std::fs::write(&json_path, json_content)?;
-            println!(
+            /*println!(
                 "已写入 {} 个 {} 类型的节点到文件: {}",
                 type_nodes.len(),
                 node_type,
                 json_path.display()
-            );
+            );*/
         }
 
         Ok(())
@@ -700,36 +742,34 @@ impl Parser {
             let json_content = serde_json::to_string_pretty(&type_relationships)?;
             // 写入文件
             std::fs::write(&json_path, json_content)?;
-            println!(
+            /*println!(
                 "已写入 {} 个 {} 类型的关系到文件: {}",
                 type_relationships.len(),
                 key,
                 json_path.display()
-            );
+            );*/
         }
 
         Ok(())
     }
 
-    fn parse_file(
+    fn parse_python_file(
         &mut self,
         file_node: &Node,
         dir_path: &Path,
         file_path: &PathBuf,
         query_path: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let snippet_language = Language::from(file_path.to_str().unwrap());
         let query_source = if query_path.is_empty() {
-            match snippet_language {
-                Language::Python => PYTHON_DEFINITIONS_QUERY_SOURCE.to_string(),
-                Language::Go => GO_DEFINITIONS_QUERY_SOURCE.to_string(),
-                // Language::TypeScript => TYPESCRIPT_DEFINITIONS_QUERY_SOURCE.to_string(),
-                // Language::JavaScript => JAVASCRIPT_DEFINITIONS_QUERY_SOURCE.to_string(),
-            }
+            PYTHON_DEFINITIONS_QUERY_SOURCE.to_string()
         } else {
             let query_path = PathBuf::from(query_path);
             fs::read_to_string(query_path).expect("Should have been able to read the query file")
         };
+
+        if query_source == "" {
+            return Ok(());
+        }
 
         let source_code = fs::read(&file_path).expect("Should have been able to read the file");
 
@@ -737,15 +777,10 @@ impl Parser {
         //println!("[QUERY]\n\n{}\n", query_source);
 
         let mut parser = tree_sitter::Parser::new();
-        let language = match snippet_language {
-            Language::Python => &tree_sitter_python::LANGUAGE.into(),
-            Language::Go => &tree_sitter_go::LANGUAGE.into(),
-            // Language::TypeScript => tree_sitter_typescript::language_typescript(),
-            // Language::JavaScript => tree_sitter_javascript::language(),
-        };
+        let language = &tree_sitter_python::LANGUAGE.into();
         parser
             .set_language(language)
-            .expect("Error loading Python parser");
+            .expect("Error loading language parser");
 
         let tree = parser.parse(source_code.clone(), None).unwrap();
         let root_node = tree.root_node();
@@ -759,9 +794,15 @@ impl Parser {
         while let Some((mat, capture_index)) = captures.next() {
             let capture = mat.captures[*capture_index];
             let capture_name = query.capture_names()[capture.index as usize];
-            let _pos_start = capture.node.start_position();
-            let _pos_end = capture.node.end_position();
-            //println!("[CAPTURE]\nname: {capture_name}, start: {}, end: {}, text: {:?}, capture: {:?}", pos_start, pos_end, capture.node.utf8_text(&source_code).unwrap_or(""), capture.node.to_sexp());
+            let pos_start = capture.node.start_position();
+            let pos_end = capture.node.end_position();
+            /*println!(
+                "[CAPTURE]\nname: {capture_name}, start: {}, end: {}, text: {:?}, capture: {:?}",
+                pos_start,
+                pos_end,
+                capture.node.utf8_text(&source_code).unwrap_or(""),
+                capture.node.to_sexp()
+            );*/
 
             match capture_name {
                 "definition.class.name" => {
@@ -781,6 +822,7 @@ impl Parser {
                                 class_name
                             ),
                             r#type: NodeType::Class,
+                            language: file_node.language.clone(),
                             start_line: class_node.start_position().row + 1,
                             end_line: class_node.end_position().row + 1,
                             code: class_node.utf8_text(&source_code).unwrap_or("").to_string(),
@@ -805,6 +847,211 @@ impl Parser {
         }
         Ok(())
     }
+
+    fn parse_go_file(
+        &mut self,
+        file_node: &Node,
+        dir_path: &Path,
+        file_path: &PathBuf,
+        query_path: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let query_source = if query_path.is_empty() {
+            GO_DEFINITIONS_QUERY_SOURCE.to_string()
+        } else {
+            let query_path = PathBuf::from(query_path);
+            fs::read_to_string(query_path).expect("Should have been able to read the query file")
+        };
+
+        if query_source == "" {
+            return Ok(());
+        }
+
+        let source_code = fs::read(&file_path).expect("Should have been able to read the file");
+
+        //println!("[SOURCE]\n\n{}\n", String::from_utf8_lossy(&source_code));
+        //println!("[QUERY]\n\n{}\n", query_source);
+
+        let mut parser = tree_sitter::Parser::new();
+        let language = &tree_sitter_go::LANGUAGE.into();
+        parser
+            .set_language(language)
+            .expect("Error loading language parser");
+
+        let tree = parser.parse(source_code.clone(), None).unwrap();
+        let root_node = tree.root_node();
+
+        let mut cursor = tree_sitter::QueryCursor::new();
+        let query = tree_sitter::Query::new(language, &query_source).unwrap();
+        let mut captures = cursor.captures(&query, root_node, source_code.as_slice());
+
+        let mut current_node: Option<Node> = None;
+        let mut parent_struct_name: Option<String> = None;
+
+        // 使用 streaming iterator 的正确方式来迭代QueryCaptures
+        while let Some((mat, capture_index)) = captures.next() {
+            let capture = mat.captures[*capture_index];
+            let capture_name = query.capture_names()[capture.index as usize];
+            let pos_start = capture.node.start_position();
+            let pos_end = capture.node.end_position();
+            /*println!(
+                "[CAPTURE]\nname: {capture_name}, start: {}, end: {}, text: {:?}, capture: {:?}",
+                pos_start,
+                pos_end,
+                capture.node.utf8_text(&source_code).unwrap_or(""),
+                capture.node.to_sexp()
+            );*/
+
+            match capture_name {
+                "definition.class" | "definition.function" | "definition.method" => {
+                    if let Some(ref mut prev_node) = current_node.take() {
+                        if let Some(parent_struct_name) = &parent_struct_name {
+                            let node_name = prev_node.name.rsplit(':').next().unwrap_or("");
+                            prev_node.name = format!(
+                                "{}:{}.{}",
+                                Path::new(file_path)
+                                    .strip_prefix(dir_path)
+                                    .unwrap_or_else(|_| Path::new(file_path))
+                                    .to_string_lossy(),
+                                parent_struct_name,
+                                node_name
+                            );
+                        }
+                        let _ = self.add_node(&prev_node);
+
+                        let relationship =
+                            if let Some(parent_struct_name) = parent_struct_name.take() {
+                                let parent_node_name = prev_node
+                                    .name
+                                    .rsplit_once('.')
+                                    .map(|(prefix, _)| prefix)
+                                    .unwrap();
+                                let parent_node = self.nodes.get(parent_node_name).unwrap();
+                                Relationship {
+                                    r#type: EdgeType::Contains,
+                                    from: parent_node.clone(),
+                                    to: prev_node.clone(),
+                                    import: None,
+                                    alias: None,
+                                }
+                            } else {
+                                Relationship {
+                                    r#type: EdgeType::Contains,
+                                    from: file_node.clone(),
+                                    to: prev_node.clone(),
+                                    import: None,
+                                    alias: None,
+                                }
+                            };
+                        self.relationships.push(relationship);
+                    }
+
+                    current_node = Some(Node {
+                        name: "".to_string(),       // fill in later
+                        r#type: NodeType::Unparsed, // fill in later
+                        language: file_node.language.clone(),
+                        start_line: capture.node.start_position().row + 1,
+                        end_line: capture.node.end_position().row + 1,
+                        code: capture
+                            .node
+                            .utf8_text(&source_code)
+                            .unwrap_or("")
+                            .to_string(),
+                    });
+                    //println!("Create a new node: {:?}", current_node);
+                }
+                "definition.class.name" | "definition.function.name" | "definition.method.name" => {
+                    let node_name: String = capture
+                        .node
+                        .utf8_text(&source_code)
+                        .unwrap_or("")
+                        .to_string();
+                    if let Some(curr_node) = &mut current_node {
+                        curr_node.name = format!(
+                            "{}:{}",
+                            Path::new(file_path)
+                                .strip_prefix(dir_path)
+                                .unwrap_or_else(|_| Path::new(file_path))
+                                .to_string_lossy(),
+                            node_name
+                        );
+                        curr_node.r#type = match capture_name {
+                            "definition.class.name" => NodeType::Class,
+                            "definition.function.name" => NodeType::Function,
+                            "definition.method.name" => NodeType::Function,
+                            _ => NodeType::Unparsed,
+                        };
+                    }
+                }
+                "definition.method.receiver_type" | "definition.function.first_return_type" => {
+                    // struct constructor or method
+                    let node_name: String = capture
+                        .node
+                        .utf8_text(&source_code)
+                        .unwrap_or("")
+                        .to_string();
+                    let struct_node_name = format!(
+                        "{}:{}",
+                        Path::new(file_path)
+                            .strip_prefix(dir_path)
+                            .unwrap_or_else(|_| Path::new(file_path))
+                            .to_string_lossy(),
+                        node_name,
+                    );
+                    // 检查父节点是否存在，先调用闭包再检查
+                    if self.nodes.contains_key(&struct_node_name) {
+                        parent_struct_name = Some(node_name);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        //println!("What??, current_node: {:?}, parent_struct_name: {:?}", current_node, parent_struct_name);
+
+        // Add the last node, if any.
+        if let Some(ref mut prev_node) = current_node.take() {
+            if let Some(parent_struct_name) = &parent_struct_name {
+                let node_name = prev_node.name.rsplit(':').next().unwrap_or("");
+                prev_node.name = format!(
+                    "{}:{}.{}",
+                    Path::new(file_path)
+                        .strip_prefix(dir_path)
+                        .unwrap_or_else(|_| Path::new(file_path))
+                        .to_string_lossy(),
+                    parent_struct_name,
+                    node_name
+                );
+            }
+            let _ = self.add_node(&prev_node);
+
+            let relationship = if let Some(parent_struct_name) = parent_struct_name.take() {
+                let parent_node_name = prev_node
+                    .name
+                    .rsplit_once('.')
+                    .map(|(prefix, _)| prefix)
+                    .unwrap();
+                let parent_node = self.nodes.get(parent_node_name).unwrap();
+                Relationship {
+                    r#type: EdgeType::Contains,
+                    from: parent_node.clone(),
+                    to: prev_node.clone(),
+                    import: None,
+                    alias: None,
+                }
+            } else {
+                Relationship {
+                    r#type: EdgeType::Contains,
+                    from: file_node.clone(),
+                    to: prev_node.clone(),
+                    import: None,
+                    alias: None,
+                }
+            };
+            self.relationships.push(relationship);
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -813,7 +1060,7 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn test_parse() {
+    fn test_parse_python() {
         // Create test file
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let dir_path = PathBuf::from(manifest_dir).join("examples").join("python");
@@ -821,6 +1068,36 @@ mod tests {
 
         let config = ParserConfig::default()
             .ignore_patterns(vec!["*".to_string(), "!d.py".to_string()])
+            .out_dir(out_dir);
+        let mut parser = Parser::new(config);
+        let result = parser.parse(dir_path);
+        match result {
+            Ok((nodes, relationships)) => {
+                for node in nodes {
+                    println!("Node: {:?}", node);
+                }
+                for rel in relationships {
+                    println!("Relationship: {:?}", rel);
+                }
+            }
+            Err(e) => {
+                println!("Failed to parse: {:?}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_go() {
+        // Create test file
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let dir_path = PathBuf::from(manifest_dir)
+            .join("examples")
+            .join("go")
+            .join("demo");
+        let out_dir = dir_path.join("temp_out").to_str().unwrap().to_string();
+
+        let config = ParserConfig::default()
+            .ignore_patterns(vec!["*".to_string(), "!*.go".to_string()])
             .out_dir(out_dir);
         let mut parser = Parser::new(config);
         let result = parser.parse(dir_path);

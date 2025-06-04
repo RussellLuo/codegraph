@@ -73,6 +73,8 @@ pub struct Node {
     pub short_names: Vec<String>,
     // Node type
     pub r#type: NodeType,
+    // Language type
+    pub language: String,
     /// Start line (0-based)
     pub start_line: u32,
     /// End line (0-based)
@@ -89,6 +91,7 @@ impl From<codegraph::Node> for Node {
             name: n.name,
             short_names,
             r#type: NodeType::from(n.r#type),
+            language: n.language.to_string(),
             start_line: n.start_line as u32,
             end_line: n.end_line as u32,
             code: n.code,
@@ -101,6 +104,7 @@ impl Into<codegraph::Node> for Node {
         codegraph::Node {
             name: self.name,
             r#type: self.r#type.into(),
+            language: self.language.parse().unwrap(),
             start_line: self.start_line as usize,
             end_line: self.end_line as usize,
             code: self.code,
