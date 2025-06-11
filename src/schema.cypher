@@ -2,29 +2,31 @@
 CREATE NODE TABLE IF NOT EXISTS Unparsed (
     name STRING,
     type STRING,
-    short_names STRING[],
+    short_name STRING,
     PRIMARY KEY(name)
 );
 CREATE NODE TABLE IF NOT EXISTS Directory (
     name STRING,
     type STRING,
-    short_names STRING[],
+    short_name STRING,
     PRIMARY KEY(name)
 );
 CREATE NODE TABLE IF NOT EXISTS File (
     name STRING,
     type STRING,
+    short_name STRING,
     language STRING,
-    short_names STRING[],
     code STRING,
+    skeleton_code STRING,
     PRIMARY KEY(name)
 );
 CREATE NODE TABLE IF NOT EXISTS Class (
     name STRING,
     type STRING,
+    short_name STRING,
     language STRING,
-    short_names STRING[],
     code STRING,
+    skeleton_code STRING,
     start_line UINT32,
     end_line UINT32,
     PRIMARY KEY(name)
@@ -32,9 +34,10 @@ CREATE NODE TABLE IF NOT EXISTS Class (
 CREATE NODE TABLE IF NOT EXISTS Function (
     name STRING,
     type STRING,
+    short_name STRING,
     language STRING,
-    short_names STRING[],
     code STRING,
+    skeleton_code STRING,
     start_line UINT32,
     end_line UINT32,
     PRIMARY KEY(name)
@@ -42,7 +45,8 @@ CREATE NODE TABLE IF NOT EXISTS Function (
 CREATE NODE TABLE IF NOT EXISTS Variable (
     name STRING,
     type STRING,
-    short_names STRING[],
+    short_name STRING,
+    language STRING,
     code STRING,
     start_line UINT32,
     end_line UINT32,
@@ -60,6 +64,7 @@ CREATE REL TABLE IF NOT EXISTS CONTAINS (
     type STRING
 );
 CREATE REL TABLE IF NOT EXISTS IMPORTS (
+    From File To Directory, // import directory as package
     From File To File,
     From File To Class,
     From File To Function,

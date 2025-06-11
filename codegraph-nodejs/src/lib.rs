@@ -70,7 +70,7 @@ impl Into<codegraph::EdgeType> for EdgeType {
 pub struct Node {
     /// File path
     pub name: String,
-    pub short_names: Vec<String>,
+    pub short_name: String,
     // Node type
     pub r#type: NodeType,
     // Language type
@@ -81,20 +81,23 @@ pub struct Node {
     pub end_line: u32,
     /// The code text
     pub code: String,
+    /// The skeleton code text
+    pub skeleton_code: String,
 }
 
 impl From<codegraph::Node> for Node {
     fn from(n: codegraph::Node) -> Self {
         // 先获取需要借用的数据，避免所有权冲突
-        let short_names = n.short_names().clone();
+        let short_name = n.short_name().clone();
         Self {
             name: n.name,
-            short_names,
+            short_name,
             r#type: NodeType::from(n.r#type),
             language: n.language.to_string(),
             start_line: n.start_line as u32,
             end_line: n.end_line as u32,
             code: n.code,
+            skeleton_code: n.skeleton_code,
         }
     }
 }
@@ -108,6 +111,7 @@ impl Into<codegraph::Node> for Node {
             start_line: self.start_line as usize,
             end_line: self.end_line as usize,
             code: self.code,
+            skeleton_code: self.skeleton_code,
         }
     }
 }
@@ -152,8 +156,28 @@ impl Into<codegraph::Relationship> for Relationship {
 }
 
 #[napi(object)]
+#[derive(Clone)]
+pub struct Snippet {
+    pub path: String,
+    pub start_line: u32,
+    pub end_line: u32,
+    pub content: String,
+}
+
+impl From<codegraph::Snippet> for Snippet {
+    fn from(s: codegraph::Snippet) -> Self {
+        Self {
+            path: s.path,
+            start_line: s.start_line as u32,
+            end_line: s.end_line as u32,
+            content: s.content,
+        }
+    }
+}
+
+#[napi(object)]
 #[derive(Clone, Debug)]
-pub struct ParserConfig {
+pub struct Config {
     /// Whether to recursively traverse subdirectories (default is true)
     pub recursive: Option<bool>,
     /// Whether to follow symbolic links (default is false)
@@ -179,9 +203,9 @@ pub struct ParserConfig {
     pub out_dir: Option<String>,
 }
 
-impl Into<codegraph::ParserConfig> for ParserConfig {
-    fn into(self) -> codegraph::ParserConfig {
-        let mut cfg = codegraph::ParserConfig::default();
+impl Into<codegraph::Config> for Config {
+    fn into(self) -> codegraph::Config {
+        let mut cfg = codegraph::Config::default();
         if let Some(recursive) = self.recursive {
             cfg = cfg.recursive(recursive);
         }
@@ -213,12 +237,16 @@ pub struct ParseResult {
 }
 
 #[napi]
-pub struct Parser {
-    parser: codegraph::Parser,
+pub struct CodeGraph {
+    db_path: String,
+    repo_path: String,
+    config: Config,
+
+    graph: codegraph::CodeGraph,
 }
 
 #[napi]
-impl Parser {
+impl CodeGraph {
     // Args:
     // db_path: Path of the indexing database to use.
     //
@@ -227,33 +255,95 @@ impl Parser {
     // ```javascript
     // import * as codegraph from '@codegraph-js/codegraph'
     // let config = {};
-    // let graph = new codegraph.Parser(config);
+    // let graph = new codegraph.Parser("path/to/db", "/path/to/repo", config);
     // ```
     #[napi(constructor)]
-    pub fn new(config: ParserConfig) -> Self {
+    pub fn new(db_path: String, repo_path: String, config: Config) -> Self {
         Self {
-            parser: codegraph::Parser::new(config.into()),
+            db_path: db_path.clone(),
+            repo_path: repo_path.clone(),
+            config: config.clone(),
+            graph: codegraph::CodeGraph::new(
+                PathBuf::from(db_path),
+                PathBuf::from(repo_path),
+                config.into(),
+            ),
         }
     }
 
     #[napi]
-    pub fn parse(&mut self, dir_path: String) -> napi::Result<ParseResult> {
-        let result = self.parser.parse(PathBuf::from(dir_path));
-        if let Ok((nodes, relationships)) = result {
-            let js_nodes = nodes.into_iter().map(Node::from).collect::<Vec<_>>();
-            let js_relationships = relationships
-                .into_iter()
-                .map(Relationship::from)
-                .collect::<Vec<_>>();
-            Ok(ParseResult {
-                nodes: js_nodes,
-                relationships: js_relationships,
-            })
-        } else {
-            Ok(ParseResult {
-                nodes: vec![],
-                relationships: vec![],
-            })
+    pub fn index(&mut self, paths: Vec<String>) -> napi::bindgen_prelude::AsyncTask<AsyncIndex> {
+        napi::bindgen_prelude::AsyncTask::new(AsyncIndex {
+            db_path: self.db_path.clone(),
+            repo_path: self.repo_path.clone(),
+            config: self.config.clone(),
+            paths: paths.clone(),
+        })
+    }
+
+    #[napi]
+    pub fn get_func_param_types(
+        &mut self,
+        file_path: String,
+        line: u32,
+    ) -> napi::Result<Vec<Snippet>> {
+        let result = self.graph.get_func_param_types(file_path, line as usize);
+        match result {
+            Ok(snippets) => {
+                let js_snippets = snippets.into_iter().map(Snippet::from).collect::<Vec<_>>();
+                Ok(js_snippets)
+            }
+            Err(e) => Err(napi::Error::from_reason(format!(
+                "Failed to get function parameter types: {}",
+                e
+            ))),
         }
+    }
+
+    #[napi]
+    pub fn clean(&mut self, del: bool) -> napi::Result<()> {
+        match self.graph.clean(del) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(napi::Error::from_reason(format!("Cleaning failed: {}", e))),
+        }
+    }
+}
+
+/// Make graph.index() asynchronous.
+/// see https://napi.rs/docs/concepts/async-task.
+///
+/// The current implementation is a little bit dirty...
+struct AsyncIndex {
+    db_path: String,
+    repo_path: String,
+    config: Config,
+    paths: Vec<String>,
+}
+
+#[napi]
+impl napi::Task for AsyncIndex {
+    type Output = ();
+    type JsValue = napi::JsUndefined;
+
+    fn compute(&mut self) -> napi::Result<Self::Output> {
+        let mut graph = codegraph::CodeGraph::new(
+            PathBuf::from(self.db_path.clone()),
+            PathBuf::from(self.repo_path.clone()),
+            self.config.clone().into(),
+        );
+        let paths = self.paths.iter().map(|p| PathBuf::from(p)).collect();
+        match graph.index(paths) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(napi::Error::from_reason(format!("Indexing failed: {}", e))),
+        }
+    }
+
+    fn resolve(&mut self, env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
+        env.get_undefined()
+    }
+
+    fn reject(&mut self, env: napi::Env, err: napi::Error) -> napi::Result<Self::JsValue> {
+        // some cleanup
+        Err(err)
     }
 }

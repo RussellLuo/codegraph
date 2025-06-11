@@ -19,7 +19,7 @@ export const enum EdgeType {
 export interface Node {
   /** File path */
   name: string
-  shortNames: Array<string>
+  shortName: string
   type: NodeType
   language: string
   /** Start line (0-based) */
@@ -28,6 +28,8 @@ export interface Node {
   endLine: number
   /** The code text */
   code: string
+  /** The skeleton code text */
+  skeletonCode: string
 }
 export interface Relationship {
   /** 关系类型 */
@@ -41,7 +43,13 @@ export interface Relationship {
   /** 别名（可选） */
   alias?: string
 }
-export interface ParserConfig {
+export interface Snippet {
+  path: string
+  startLine: number
+  endLine: number
+  content: string
+}
+export interface Config {
   /** Whether to recursively traverse subdirectories (default is true) */
   recursive?: boolean
   /** Whether to follow symbolic links (default is false) */
@@ -74,7 +82,9 @@ export interface ParseResult {
   nodes: Array<Node>
   relationships: Array<Relationship>
 }
-export declare class Parser {
-  constructor(config: ParserConfig)
-  parse(dirPath: string): ParseResult
+export declare class CodeGraph {
+  constructor(dbPath: string, repoPath: string, config: Config)
+  index(paths: Array<string>): Promise<unknown>
+  getFuncParamTypes(filePath: string, line: number): Array<Snippet>
+  clean(del: boolean): void
 }

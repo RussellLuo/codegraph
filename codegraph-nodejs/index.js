@@ -310,8 +310,8 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { NodeType, EdgeType, Parser } = nativeBinding
+const { NodeType, EdgeType, CodeGraph } = nativeBinding
 
 module.exports.NodeType = NodeType
 module.exports.EdgeType = EdgeType
-module.exports.Parser = Parser
+module.exports.CodeGraph = CodeGraph
