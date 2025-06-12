@@ -35,15 +35,102 @@ impl CodeGraph {
         }
     }
 
-    pub fn index(&mut self, paths: Vec<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
-        // Only parse the first path for now.
-        let (nodes, relationships) = self.parser.parse(paths[0].clone())?;
-        self.parser.save(&mut self.db)?;
+    /// Index the given paths into the database.
+    ///
+    /// If `force` is true, the existing files will be re-indexed.
+    pub fn index(&mut self, path: PathBuf, force: bool) -> Result<(), Box<dyn std::error::Error>> {
+        if path == self.repo_path {
+            // Try to index the root directory of the repository.
+            // We assume that there are many files in the repository, so we need to
+            // use the Kuzu's `COPY FROM` command (i.e. batch insert) for better performance.
+
+            if force {
+                // Since the `COPY FROM` command does not support deleting existing nodes,
+                // we need to delete the existing nodes manually.
+                self.db.clean()?;
+            }
+
+            let (nodes, relationships) = self.parser.parse(path.clone())?;
+            self.db.bulk_insert_nodes_via_csv(&nodes)?;
+            self.db.bulk_insert_relationships_via_csv(&relationships)?;
+
+            // TODO: needs improvement.
+            let type_rels = self.parser.resolve_func_param_type_relationships(
+                &self.parser.nodes,
+                &self.parser.func_param_types,
+                &mut self.db,
+            )?;
+            self.db.bulk_insert_relationships_via_csv(&type_rels)?;
+
+            return Ok(());
+        }
+
+        // Otherwise, we assume that the given path is a single file or a small directory.
+        // We use the Kuzu's `MERGE` command to upsert (i.e. insert or update) the nodes.
+        if path.is_file() {
+            // TODO: find all existing nodes related to the file.
+            //
+            let stmt = format!(
+                r#"
+MATCH (file)-[:CONTAINS*1..2]->(def)
+WHERE file.name = "{}"
+RETURN def;
+"#,
+                path.strip_prefix(self.repo_path.clone())
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .to_string(),
+            );
+            let old_nodes = self.db.query_nodes(stmt.as_str())?;
+
+            let (file_node, nodes, rels, func_param_types) = self.parser.parse_file(&path)?;
+
+            // Delete outdated nodes.
+            // Find nodes that exist in old_nodes but not in nodes (outdated nodes to be deleted)
+            let node_names_to_delete: Vec<String> = old_nodes
+                .into_iter()
+                .filter(|old_node| !nodes.contains_key(&old_node.name))
+                .map(|old_node| old_node.name)
+                .collect();
+            self.db.delete_nodes(&node_names_to_delete)?;
+
+            // Upsert the file node first.
+            self.db.upsert_nodes(&vec![file_node])?;
+
+            // Upsert the rest of the nodes and relationships.
+            let vec_nodes: Vec<Node> = nodes.values().cloned().collect();
+            self.db.upsert_nodes(&vec_nodes)?;
+            self.db.upsert_relationships(&rels)?;
+
+            // TODO: needs improvement.
+            let type_rels = self.parser.resolve_func_param_type_relationships(
+                &nodes,
+                &func_param_types.unwrap(),
+                &mut self.db,
+            )?;
+            self.db.bulk_insert_relationships_via_csv(&type_rels)?;
+        } else if path.is_dir() {
+            return Err("Not supported yet".into());
+        } else {
+            return Err(format!(
+                "{:?} does not exist or is neither a file nor directory",
+                path
+            )
+            .into());
+        }
+
         Ok(())
     }
 
-    pub fn query(&mut self, stmt: String) -> Result<Vec<Node>, Box<dyn std::error::Error>> {
+    pub fn query_nodes(&mut self, stmt: String) -> Result<Vec<Node>, Box<dyn std::error::Error>> {
         return self.db.query_nodes(stmt.as_str());
+    }
+
+    pub fn query_relationships(
+        &mut self,
+        stmt: String,
+    ) -> Result<Vec<Relationship>, Box<dyn std::error::Error>> {
+        return self.db.query_relationships(stmt.as_str());
     }
 
     pub fn get_func_param_types(
@@ -120,6 +207,10 @@ RETURN file.name, typ.start_line, typ.end_line, typ.code, COLLECT(meth.skeleton_
 
     /// Clean the database.
     /// If `delete` is true, the database directory will be deleted. Otherwise, the database will be cleaned up.
+    ///
+    /// TODO: support clean specific files or directories.
+    /// - `clean(path: PathBuf)`
+    /// - `clean(path: PathBuf, delete: bool)`
     pub fn clean(&mut self, delete: bool) -> Result<(), Box<dyn std::error::Error>> {
         if !delete {
             self.db.clean()?;
@@ -141,35 +232,176 @@ mod tests {
 
     #[test]
     fn test_index() {
-        //let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        //let dir_path = PathBuf::from(manifest_dir)
-        //    .join("examples")
-        //    .join("go")
-        //    .join("demo");
-        let dir_path =
-            PathBuf::from("/Users/russellluo/Projects/work/opencsg/projects/starhub-server");
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let dir_path = PathBuf::from(manifest_dir)
+            .join("examples")
+            .join("go")
+            .join("demo");
         let db_path = dir_path.join("kuzu_db");
 
-        let config = Config::default().ignore_patterns(vec!["*".to_string(), "!*.go".to_string()]);
+        let config = Config::default().ignore_patterns(vec![
+            "*".to_string(),
+            "!main.go".to_string(),
+            "!types.go".to_string(),
+        ]);
         let mut graph = CodeGraph::new(db_path, dir_path.clone(), config);
-        match graph.index(vec![dir_path]) {
+
+        match graph.index(dir_path, false) {
             Err(e) => {
                 println!("Failed to index: {:?}", e);
             }
             Ok(_) => {}
         }
-        let result = graph.query("MATCH (n) RETURN *".to_string());
-        match result {
-            Ok(nodes) => {
-                /*for node in nodes {
-                    println!("Query Node: {:?}", node);
-                }*/
-            }
-            Err(e) => {
-                println!("Failed to query: {:?}", e);
-            }
-        }
-        //let _ = graph.clean(true);
+        let existing_nodes = graph.query_nodes("MATCH (n) RETURN n".to_string()).unwrap();
+        assert_eq!(existing_nodes.len(), 11);
+        let _ = graph.clean(true);
+    }
+
+    #[test]
+    fn test_index_upsert_file() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let repo_path = PathBuf::from(manifest_dir)
+            .join("examples")
+            .join("go")
+            .join("demo");
+        let db_path = repo_path.join("kuzu_db");
+
+        let config = Config::default().ignore_patterns(vec![
+            "*".to_string(),
+            "!main.go".to_string(),
+            "!types.go".to_string(),
+        ]);
+        let mut graph = CodeGraph::new(db_path, repo_path.clone(), config);
+
+        // 1.1 initial index
+        graph.clean(true).unwrap();
+        graph.index(repo_path.clone(), true).unwrap();
+
+        // 1.2 assert data
+        let final_nodes = graph.query_nodes("MATCH (n) RETURN n".to_string()).unwrap();
+        let final_rels = graph
+            .query_relationships("MATCH (a)-[e]->(b) RETURN a.name, b.name, e".to_string())
+            .unwrap();
+        let mut node_strings: Vec<_> = final_nodes.into_iter().map(|n| n.name).collect();
+        let mut rel_strings: Vec<_> = final_rels
+            .into_iter()
+            .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
+            .collect();
+
+        node_strings.sort();
+        rel_strings.sort();
+
+        assert_eq!(
+            node_strings,
+            [
+                ".",
+                "main.go",
+                "main.go:User",
+                "main.go:User.DisplayInfo",
+                "main.go:User.NewUser",
+                "main.go:User.SetAddress",
+                "main.go:User.UpdateEmail",
+                "main.go:main",
+                "types.go",
+                "types.go:Address",
+                "types.go:Hobby"
+            ]
+        );
+        assert_eq!(
+            rel_strings,
+            [
+                ".-[contains]->main.go",
+                ".-[contains]->types.go",
+                "main.go-[contains]->main.go:User",
+                "main.go-[contains]->main.go:main",
+                "main.go:User-[contains]->main.go:User.DisplayInfo",
+                "main.go:User-[contains]->main.go:User.NewUser",
+                "main.go:User-[contains]->main.go:User.SetAddress",
+                "main.go:User-[contains]->main.go:User.UpdateEmail",
+                "main.go:User.SetAddress-[references]->types.go:Address",
+                "types.go-[contains]->types.go:Address",
+                "types.go-[contains]->types.go:Hobby"
+            ],
+        );
+
+        // 2.1 upsert `types.go`
+        let types_go_path = repo_path
+            .clone()
+            .join("types.go")
+            .to_string_lossy()
+            .to_string();
+        let modified_file_path = repo_path
+            .clone()
+            .join("diff")
+            .join("modified_types.go")
+            .to_string_lossy()
+            .to_string();
+        let _ = duct::cmd!("cp", modified_file_path, types_go_path.clone())
+            .read()
+            .unwrap();
+
+        graph
+            .index(repo_path.clone().join("types.go"), true)
+            .unwrap();
+
+        // 2.2 assert data
+        let final_nodes = graph.query_nodes("MATCH (n) RETURN n".to_string()).unwrap();
+        let final_rels = graph
+            .query_relationships("MATCH (a)-[e]->(b) RETURN a.name, b.name, e".to_string())
+            .unwrap();
+        let mut node_strings: Vec<_> = final_nodes.into_iter().map(|n| n.name).collect();
+        let mut rel_strings: Vec<_> = final_rels
+            .into_iter()
+            .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
+            .collect();
+
+        node_strings.sort();
+        rel_strings.sort();
+
+        assert_eq!(
+            node_strings,
+            [
+                ".",
+                "main.go",
+                "main.go:User",
+                "main.go:User.DisplayInfo",
+                "main.go:User.NewUser",
+                "main.go:User.SetAddress",
+                "main.go:User.UpdateEmail",
+                "main.go:main",
+                "types.go",
+                "types.go:Address2",
+                "types.go:Hobby"
+            ]
+        );
+        assert_eq!(
+            rel_strings,
+            [
+                ".-[contains]->main.go",
+                ".-[contains]->types.go",
+                "main.go-[contains]->main.go:User",
+                "main.go-[contains]->main.go:main",
+                "main.go:User-[contains]->main.go:User.DisplayInfo",
+                "main.go:User-[contains]->main.go:User.NewUser",
+                "main.go:User-[contains]->main.go:User.SetAddress",
+                "main.go:User-[contains]->main.go:User.UpdateEmail",
+                "types.go-[contains]->types.go:Address2",
+                "types.go-[contains]->types.go:Hobby"
+            ],
+        );
+
+        // 3. clean up (revert `types.go`)
+        graph.clean(true).unwrap();
+
+        let original_file_path = repo_path
+            .clone()
+            .join("diff")
+            .join("original_types.go")
+            .to_string_lossy()
+            .to_string();
+        let _ = duct::cmd!("cp", original_file_path, types_go_path.clone())
+            .read()
+            .unwrap();
     }
 
     #[test]
@@ -181,11 +413,17 @@ mod tests {
             .join("demo");
         let db_path = dir_path.join("kuzu_db");
 
-        let config = Config::default().ignore_patterns(vec!["*".to_string(), "!*.go".to_string()]);
+        let config = Config::default().ignore_patterns(vec![
+            "*".to_string(),
+            "!main.go".to_string(),
+            "!types.go".to_string(),
+        ]);
         let mut graph = CodeGraph::new(db_path, dir_path.clone(), config);
+        graph.index(dir_path, false).unwrap();
+
         //let file_path = "/Users/russellluo/Projects/work/opencsg/projects/starhub-server/builder/store/database/mirror.go".to_string();
         let file_path = "main.go".to_string();
-        let line = 50;
+        let line = 37; // SetAddress()
         let result = graph.get_func_param_types(file_path, line);
         match result {
             Ok(snippets) => {

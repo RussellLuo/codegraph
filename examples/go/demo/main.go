@@ -5,18 +5,6 @@ import (
 	"time"
 )
 
-type (
-	Address struct {
-		Country string
-		City    string
-	}
-
-	Hobby struct {
-		Sports bool
-		Music  bool
-	}
-)
-
 type User struct {
 	ID        int
 	Username  string

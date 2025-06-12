@@ -272,12 +272,17 @@ impl CodeGraph {
     }
 
     #[napi]
-    pub fn index(&mut self, paths: Vec<String>) -> napi::bindgen_prelude::AsyncTask<AsyncIndex> {
+    pub fn index(
+        &mut self,
+        path: String,
+        force: bool,
+    ) -> napi::bindgen_prelude::AsyncTask<AsyncIndex> {
         napi::bindgen_prelude::AsyncTask::new(AsyncIndex {
             db_path: self.db_path.clone(),
             repo_path: self.repo_path.clone(),
             config: self.config.clone(),
-            paths: paths.clone(),
+            path: path.clone(),
+            force: force,
         })
     }
 
@@ -317,7 +322,8 @@ struct AsyncIndex {
     db_path: String,
     repo_path: String,
     config: Config,
-    paths: Vec<String>,
+    path: String,
+    force: bool,
 }
 
 #[napi]
@@ -331,8 +337,7 @@ impl napi::Task for AsyncIndex {
             PathBuf::from(self.repo_path.clone()),
             self.config.clone().into(),
         );
-        let paths = self.paths.iter().map(|p| PathBuf::from(p)).collect();
-        match graph.index(paths) {
+        match graph.index(PathBuf::from(self.path.clone()), self.force) {
             Ok(_) => Ok(()),
             Err(e) => Err(napi::Error::from_reason(format!("Indexing failed: {}", e))),
         }

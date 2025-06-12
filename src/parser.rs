@@ -1,4 +1,5 @@
 use glob::Pattern;
+use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -95,7 +96,7 @@ impl ParserConfig {
     }
 }
 
-struct FuncParamType {
+pub struct FuncParamType {
     type_name: String,
     package_name: Option<String>,
 }
@@ -103,9 +104,9 @@ struct FuncParamType {
 pub struct Parser {
     repo_path: PathBuf,
     config: ParserConfig,
-    nodes: HashMap<String, Node>,
+    pub nodes: IndexMap<String, Node>,
     relationships: Vec<Relationship>,
-    func_param_types: HashMap<String, FuncParamType>, // function name -> parameter types
+    pub func_param_types: HashMap<String, FuncParamType>, // function name -> parameter types
     // language-specific properties
     go_module_path: Option<String>,
 }
@@ -115,7 +116,7 @@ impl Parser {
         Parser {
             repo_path: repo_path,
             config: config,
-            nodes: HashMap::new(),
+            nodes: IndexMap::new(),
             relationships: Vec::new(),
             func_param_types: HashMap::new(),
             go_module_path: None,
@@ -155,27 +156,16 @@ impl Parser {
         }
     }
 
-    pub fn save(&mut self, db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
-        let nodes: Vec<Node> = self.nodes.values().cloned().collect();
-
-        //db.bulk_insert_nodes(&nodes)?;
-        //db.bulk_insert_relationships(&self.relationships)?;
-        db.bulk_insert_nodes_via_csv(&nodes)?;
-        db.bulk_insert_relationships_via_csv(&self.relationships)?;
-
-        self.resolve_func_param_type_relationships(db)?;
-
-        Ok(())
-    }
-
-    fn resolve_func_param_type_relationships(
-        &mut self,
+    pub fn resolve_func_param_type_relationships(
+        &self,
+        nodes: &IndexMap<String, Node>,
+        func_param_types: &HashMap<String, FuncParamType>,
         db: &mut Database,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<Vec<Relationship>, Box<dyn std::error::Error>> {
         let mut relationships: Vec<Relationship> = Vec::new();
 
-        for (func_name, param_type) in &self.func_param_types {
-            let func_node = self.nodes.get(func_name);
+        for (func_name, param_type) in func_param_types {
+            let func_node = nodes.get(func_name);
             let mut type_node: Option<Node> = None;
 
             if let Some(package_name) = &param_type.package_name {
@@ -233,9 +223,7 @@ RETURN typ;
             }
         }
 
-        //db.bulk_insert_relationships(&relationships)?;
-        db.bulk_insert_relationships_via_csv(&relationships)?;
-        Ok(())
+        Ok(relationships)
     }
 
     /// Traverses all files and directories in the specified directory, creates Node and Relationship objects
@@ -310,7 +298,7 @@ RETURN typ;
             //    .unwrap_or(dir_path)
             //    .to_string_lossy()
             //    .to_string(),
-            name: String::from("."),
+            name: String::from(""),
             r#type: NodeType::Directory,
             language: Language::Text,
             start_line: 0,
@@ -386,36 +374,16 @@ RETURN typ;
                             skeleton_code: String::from(""),
                         }
                     } else {
-                        let file_language =
-                            Language::from_path(entry_path.to_path_buf().to_str().unwrap());
-                        let file_node = Node {
-                            name: entry_path
-                                .strip_prefix(dir_path)
-                                .unwrap_or(entry_path)
-                                .to_string_lossy()
-                                .to_string(),
-                            r#type: NodeType::File,
-                            language: file_language,
-                            start_line: 0,
-                            end_line: 0,
-                            code: String::new(),
-                            skeleton_code: String::from(""),
-                        };
-                        // Parse the file and add parsed nodes to the collection
-                        match file_node.language {
-                            Language::Python => self.parse_python_file(
-                                &file_node,
-                                dir_path,
-                                &entry_path.to_path_buf(),
-                                "",
-                            )?,
-                            Language::Go => self.parse_go_file(
-                                &file_node,
-                                dir_path,
-                                &entry_path.to_path_buf(),
-                                "",
-                            )?,
-                            Language::Text => (),
+                        let (file_node, nodes, rels, func_param_types) =
+                            self.parse_file(&entry_path)?;
+                        for (n_name, n) in nodes {
+                            self.nodes.insert(n_name, n);
+                        }
+                        for r in rels {
+                            self.relationships.push(r);
+                        }
+                        if let Some(func_param_types) = func_param_types {
+                            self.func_param_types.extend(func_param_types);
                         }
 
                         // Sleep for a short duration to avoid high CPU usage during traversal.
@@ -487,13 +455,61 @@ RETURN typ;
         Ok(())
     }
 
+    pub fn parse_file(
+        &self,
+        file_path: &Path,
+    ) -> Result<
+        (
+            Node,
+            IndexMap<String, Node>,
+            Vec<Relationship>,
+            Option<HashMap<String, FuncParamType>>,
+        ),
+        Box<dyn std::error::Error>,
+    > {
+        let file_language = Language::from_path(file_path.to_path_buf().to_str().unwrap());
+        let file_node = Node {
+            name: file_path
+                .strip_prefix(&self.repo_path)
+                .unwrap_or(file_path)
+                .to_string_lossy()
+                .to_string(),
+            r#type: NodeType::File,
+            language: file_language,
+            start_line: 0,
+            end_line: 0,                     // TODO: add end line number
+            code: String::new(),             // TODO: add file code
+            skeleton_code: String::from(""), // TODO: add file skeleton code
+        };
+        // Parse the file and add parsed nodes to the collection
+        match file_node.language {
+            Language::Python => {
+                let (nodes, rels) = self.parse_python_file(
+                    &file_node,
+                    &self.repo_path,
+                    &file_path.to_path_buf(),
+                    "",
+                )?;
+                return Ok((file_node, nodes, rels, None));
+            }
+            Language::Go => {
+                let (nodes, rels, func_param_types) =
+                    self.parse_go_file(&file_node, &self.repo_path, &file_path.to_path_buf(), "")?;
+                return Ok((file_node, nodes, rels, func_param_types));
+            }
+            Language::Text => {
+                return Ok((file_node, IndexMap::new(), vec![], None));
+            }
+        }
+    }
+
     fn parse_python_file(
-        &mut self,
+        &self,
         file_node: &Node,
         dir_path: &Path,
         file_path: &PathBuf,
         query_path: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(IndexMap<String, Node>, Vec<Relationship>), Box<dyn std::error::Error>> {
         let query_source = if query_path.is_empty() {
             PYTHON_DEFINITIONS_QUERY_SOURCE.to_string()
         } else {
@@ -502,8 +518,11 @@ RETURN typ;
         };
 
         if query_source == "" {
-            return Ok(());
+            return Ok((IndexMap::new(), vec![]));
         }
+
+        let mut nodes: IndexMap<String, Node> = IndexMap::new();
+        let mut relationships: Vec<Relationship> = Vec::new();
 
         let source_code = fs::read(&file_path).expect("Should have been able to read the file");
 
@@ -562,7 +581,7 @@ RETURN typ;
                             code: class_node.utf8_text(&source_code).unwrap_or("").to_string(),
                             skeleton_code: "".to_string(),
                         };
-                        let _ = self.add_node(&node);
+                        nodes.insert(node.name.clone(), node.clone());
 
                         let relationship = Relationship {
                             r#type: EdgeType::Contains,
@@ -571,7 +590,7 @@ RETURN typ;
                             import: None,
                             alias: None,
                         };
-                        self.relationships.push(relationship);
+                        relationships.push(relationship);
                     }
                 }
                 "definition.class" => {
@@ -580,16 +599,23 @@ RETURN typ;
                 _ => {}
             }
         }
-        Ok(())
+        Ok((nodes, relationships))
     }
 
     fn parse_go_file(
-        &mut self,
+        &self,
         file_node: &Node,
         dir_path: &Path,
         file_path: &PathBuf,
         query_path: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<
+        (
+            IndexMap<String, Node>,
+            Vec<Relationship>,
+            Option<HashMap<String, FuncParamType>>,
+        ),
+        Box<dyn std::error::Error>,
+    > {
         let query_source = if query_path.is_empty() {
             GO_DEFINITIONS_QUERY_SOURCE.to_string()
         } else {
@@ -598,8 +624,12 @@ RETURN typ;
         };
 
         if query_source == "" {
-            return Ok(());
+            return Ok((IndexMap::new(), vec![], None));
         }
+
+        let mut nodes: IndexMap<String, Node> = IndexMap::new();
+        let mut relationships: Vec<Relationship> = Vec::new();
+        let mut func_param_types: HashMap<String, FuncParamType> = HashMap::new();
 
         let source_code = fs::read(&file_path).expect("Should have been able to read the file");
 
@@ -680,7 +710,7 @@ RETURN typ;
                                 import: Some(mod_name.to_string()),
                                 alias: alias,
                             };
-                            self.relationships.push(relationship);
+                            relationships.push(relationship);
                         }
                     }
                 }
@@ -698,10 +728,10 @@ RETURN typ;
                                 node_name
                             );
                         }
-                        let _ = self.add_node(&prev_node);
+                        nodes.insert(prev_node.name.clone(), prev_node.clone());
 
                         if prev_node.r#type == NodeType::Function {
-                            self.parse_go_func_params(
+                            let param_types = self.parse_go_func_params(
                                 &prev_node.name,
                                 current_tree_sitter_main_node
                                     .unwrap()
@@ -709,7 +739,10 @@ RETURN typ;
                                     .unwrap_or_default()
                                     .to_string()
                                     .as_bytes(),
-                            )
+                            )?;
+                            for (k, v) in param_types {
+                                func_param_types.insert(k, v);
+                            }
                         }
 
                         let relationship =
@@ -719,7 +752,8 @@ RETURN typ;
                                     .rsplit_once('.')
                                     .map(|(prefix, _)| prefix)
                                     .unwrap();
-                                let parent_node = self.nodes.get(parent_node_name).unwrap();
+                                // Assume that the parent struct node is defined early in the current file.
+                                let parent_node = nodes.get(parent_node_name).unwrap();
                                 Relationship {
                                     r#type: EdgeType::Contains,
                                     from: parent_node.clone(),
@@ -736,7 +770,7 @@ RETURN typ;
                                     alias: None,
                                 }
                             };
-                        self.relationships.push(relationship);
+                        relationships.push(relationship);
                     }
 
                     let node_type = match capture_name {
@@ -793,7 +827,8 @@ RETURN typ;
                             .to_string_lossy(),
                         node_name,
                     );
-                    if self.nodes.contains_key(&struct_node_name) {
+                    // Assume that the struct node is defined early in the current file.
+                    if nodes.contains_key(&struct_node_name) {
                         parent_struct_name = Some(node_name);
                     }
                 }
@@ -830,7 +865,7 @@ RETURN typ;
                     node_name
                 );
             }
-            let _ = self.add_node(&prev_node);
+            nodes.insert(prev_node.name.clone(), prev_node.clone());
 
             let relationship = if let Some(parent_struct_name) = parent_struct_name.take() {
                 let parent_node_name = prev_node
@@ -838,7 +873,8 @@ RETURN typ;
                     .rsplit_once('.')
                     .map(|(prefix, _)| prefix)
                     .unwrap();
-                let parent_node = self.nodes.get(parent_node_name).unwrap();
+                // Assume that the parent struct node is defined early in the current file.
+                let parent_node = nodes.get(parent_node_name).unwrap();
                 Relationship {
                     r#type: EdgeType::Contains,
                     from: parent_node.clone(),
@@ -855,10 +891,10 @@ RETURN typ;
                     alias: None,
                 }
             };
-            self.relationships.push(relationship);
+            relationships.push(relationship);
 
             if prev_node.r#type == NodeType::Function {
-                self.parse_go_func_params(
+                let param_types = self.parse_go_func_params(
                     &prev_node.name,
                     current_tree_sitter_main_node
                         .unwrap()
@@ -866,14 +902,23 @@ RETURN typ;
                         .unwrap_or_default()
                         .to_string()
                         .as_bytes(),
-                )
+                )?;
+                for (k, v) in param_types {
+                    func_param_types.insert(k, v);
+                }
             }
         }
 
-        Ok(())
+        Ok((nodes, relationships, Some(func_param_types)))
     }
 
-    fn parse_go_func_params(&mut self, from_node_name: &String, source_code: &[u8]) {
+    fn parse_go_func_params(
+        &self,
+        from_node_name: &String,
+        source_code: &[u8],
+    ) -> Result<HashMap<String, FuncParamType>, Box<dyn std::error::Error>> {
+        let mut func_param_types: HashMap<String, FuncParamType> = HashMap::new(); // function name -> parameter types
+                                                                                   //
         let query_source = GO_FUNC_PARAMS_QUERY_SOURCE.to_string();
         let mut parser = tree_sitter::Parser::new();
         let language = &tree_sitter_go::LANGUAGE.into();
@@ -928,7 +973,7 @@ RETURN typ;
 
                 if !util::is_go_builtin_type(&type_name) {
                     // Save the types referenced by the currrent function/method.
-                    self.func_param_types.insert(
+                    func_param_types.insert(
                         from_node_name.clone(),
                         FuncParamType {
                             type_name,
@@ -938,6 +983,8 @@ RETURN typ;
                 }
             }
         }
+
+        Ok(func_param_types)
     }
 }
 
@@ -981,21 +1028,55 @@ mod tests {
             .join("examples")
             .join("go")
             .join("demo");
-        //let out_dir = dir_path.join("temp_out").to_str().unwrap().to_string();
 
-        let config =
-            ParserConfig::default().ignore_patterns(vec!["*".to_string(), "!*.go".to_string()]);
-        //.out_dir(out_dir);
+        let config = ParserConfig::default().ignore_patterns(vec![
+            "*".to_string(),
+            "!main.go".to_string(),
+            "!types.go".to_string(),
+        ]);
+
         let mut parser = Parser::new(dir_path.clone(), config);
         let result = parser.parse(dir_path);
         match result {
             Ok((nodes, relationships)) => {
-                //for node in nodes {
-                //    println!("Node: {:?}", node);
-                //}
-                //for rel in relationships {
-                //    println!("Relationship: {:?}", rel);
-                //}
+                let mut node_strings: Vec<_> = nodes.into_iter().map(|n| n.name).collect();
+                let mut rel_strings: Vec<_> = relationships
+                    .into_iter()
+                    .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
+                    .collect();
+
+                node_strings.sort();
+                rel_strings.sort();
+
+                assert_eq!(
+                    node_strings,
+                    [
+                        "",
+                        "main.go",
+                        "main.go:User",
+                        "main.go:User.DisplayInfo",
+                        "main.go:User.NewUser",
+                        "main.go:User.SetAddress",
+                        "main.go:User.UpdateEmail",
+                        "main.go:main",
+                        "types.go",
+                        "types.go:Address",
+                        "types.go:Hobby"
+                    ]
+                );
+                assert_eq!(
+                    rel_strings,
+                    [
+                        "main.go-[contains]->main.go:User",
+                        "main.go-[contains]->main.go:main",
+                        "main.go:User-[contains]->main.go:User.DisplayInfo",
+                        "main.go:User-[contains]->main.go:User.NewUser",
+                        "main.go:User-[contains]->main.go:User.SetAddress",
+                        "main.go:User-[contains]->main.go:User.UpdateEmail",
+                        "types.go-[contains]->types.go:Address",
+                        "types.go-[contains]->types.go:Hobby"
+                    ],
+                );
             }
             Err(e) => {
                 println!("Failed to parse: {:?}", e);

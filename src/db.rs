@@ -177,7 +177,14 @@ impl Database {
                 for field in &field_names {
                     let value = node_dict.get(field).unwrap_or(&serde_json::Value::Null);
                     record.push(match value {
-                        serde_json::Value::String(s) => s.clone(),
+                        serde_json::Value::String(s) => {
+                            if field == "name" && s.is_empty() {
+                                // Kuzu CSV does not support using empty strings as primary keys, use a placeholder "." instead.
+                                ".".to_string()
+                            } else {
+                                s.clone()
+                            }
+                        }
                         serde_json::Value::Number(n) => n.to_string(),
                         serde_json::Value::Bool(b) => b.to_string(),
                         serde_json::Value::Array(a) => serde_json::to_string(a).unwrap_or_default(),
@@ -187,6 +194,7 @@ impl Database {
                         serde_json::Value::Null => String::new(),
                     });
                 }
+                //println!("record: {:?}", record);
                 writer.write_record(&record)?;
             }
 
@@ -247,7 +255,14 @@ impl Database {
                 for field in &field_names {
                     let value = rel_dict.get(field).unwrap_or(&serde_json::Value::Null);
                     record.push(match value {
-                        serde_json::Value::String(s) => s.clone(),
+                        serde_json::Value::String(s) => {
+                            if ["from", "to"].contains(&field.as_str()) && s.is_empty() {
+                                // Kuzu CSV does not support using empty strings as node primary keys, use a placeholder "." instead.
+                                ".".to_string()
+                            } else {
+                                s.clone()
+                            }
+                        }
                         serde_json::Value::Number(n) => n.to_string(),
                         serde_json::Value::Bool(b) => b.to_string(),
                         serde_json::Value::Array(a) => serde_json::to_string(a).unwrap_or_default(),
@@ -520,6 +535,35 @@ impl Database {
         Ok(parts.join(", "))
     }
 
+    fn to_set_data(
+        tag: &str,
+        pk: &str,
+        m: &IndexMap<String, serde_json::Value>,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        // 将 HashMap 中的键值对转换为 Cypher 查询中的键值对字符串
+        let mut parts = Vec::new();
+
+        for (key, value) in m {
+            let formatted_value = match value {
+                serde_json::Value::String(s) => string_repr(s), //repr_string(s),
+                serde_json::Value::Number(n) => n.to_string(),
+                serde_json::Value::Bool(b) => b.to_string(),
+                serde_json::Value::Array(_) => serde_json::to_string(value)?,
+                serde_json::Value::Object(_) => serde_json::to_string(value)?,
+                serde_json::Value::Null => "null".to_string(),
+            };
+            // Ignore primary key to avoid errors:
+            //
+            // Runtime exception: Found duplicated primary key value '<pk>',
+            // which violates the uniqueness constraint of the primary key column.
+            if key != pk {
+                parts.push(format!("{}.{} = {}", tag, key, formatted_value));
+            }
+        }
+
+        Ok(parts.join(", "))
+    }
+
     pub fn upsert_nodes(&mut self, nodes: &Vec<Node>) -> Result<(), Box<dyn std::error::Error>> {
         self.init()?;
 
@@ -530,8 +574,17 @@ impl Database {
             for node in nodes {
                 let table_name = to_title_case(node.r#type.to_string().as_str());
                 let node_dict = node.to_dict();
-                let data = Self::to_merge_data(&node_dict)?;
-                conn.query(format!("MERGE (n:{} {{ {} }}) RETURN n.*", table_name, data).as_str())?;
+                let set_data = Self::to_set_data(&"n", &"name", &node_dict)?;
+                let query = format!(
+                    r#"
+MERGE (n:{} {{ name: "{}" }})
+ON CREATE SET {}
+ON MATCH SET {}
+"#,
+                    table_name, node.name, set_data, set_data
+                );
+                //println!("upsert_nodes query: {}", query);
+                conn.query(query.as_str())?;
             }
         }
 
@@ -608,15 +661,35 @@ impl Database {
                 match &row[0] {
                     kuzu::Value::Node(node) => {
                         let props = node.get_properties();
-                        let mut node = Node {
-                            name: String::from(""),
-                            r#type: NodeType::Unparsed,
-                            language: Language::Text,
-                            code: String::from(""),
-                            skeleton_code: String::from(""),
-                            start_line: 0,
-                            end_line: 0,
-                        };
+                        let mut node = Node::from_type_and_name(NodeType::Unparsed, "".to_string());
+                        for (prop_name, prop_value) in props {
+                            match prop_name.as_str() {
+                                "name" => {
+                                    node.name = prop_value.to_string();
+                                }
+                                "type" => {
+                                    node.r#type = prop_value
+                                        .to_string()
+                                        .parse()
+                                        .unwrap_or(NodeType::Unparsed);
+                                }
+                                "language" => {
+                                    node.language =
+                                        prop_value.to_string().parse().unwrap_or(Language::Text);
+                                }
+                                "code" => {
+                                    node.code = prop_value.to_string();
+                                }
+                                "start_line" => {
+                                    node.start_line = prop_value.to_string().parse().unwrap_or(0);
+                                }
+                                "end_line" => {
+                                    node.end_line = prop_value.to_string().parse().unwrap_or(0);
+                                }
+                                _ => {}
+                            }
+                        }
+                        /*
                         if let kuzu::Value::String(name) = &props[0].1 {
                             node.name = name.to_string();
                         }
@@ -635,6 +708,7 @@ impl Database {
                         if let kuzu::Value::UInt32(line) = &props[6].1 {
                             node.end_line = *line as usize;
                         }
+                        */
                         nodes.push(node);
                     }
                     _ => println!("Unrecoginized node type"),
@@ -644,11 +718,121 @@ impl Database {
         Ok(nodes)
     }
 
+    pub fn query_relationships(
+        &mut self,
+        stmt: &str,
+    ) -> Result<Vec<Relationship>, Box<dyn std::error::Error>> {
+        self.init()?;
+
+        let mut relationships: Vec<Relationship> = vec![];
+
+        if let Some(db) = &self.db {
+            let conn = kuzu::Connection::new(db)?;
+            let result = conn.query(stmt)?;
+            for row in result {
+                let from_node_name = match &row[0] {
+                    kuzu::Value::String(name) => name.clone(),
+                    _ => "".to_string(),
+                };
+                let to_node_name = match &row[1] {
+                    kuzu::Value::String(name) => name.clone(),
+                    _ => "".to_string(),
+                };
+                match &row[2] {
+                    kuzu::Value::Rel(rel) => {
+                        let props = rel.get_properties();
+
+                        let mut typ: String = "".to_string();
+                        let mut import: Option<String> = None;
+                        let mut alias: Option<String> = None;
+                        for (prop_name, prop_value) in props {
+                            match prop_name.as_str() {
+                                "type" => {
+                                    typ = prop_value.to_string();
+                                }
+                                "import" => {
+                                    import = Some(prop_value.to_string());
+                                }
+                                "alias" => {
+                                    alias = Some(prop_value.to_string());
+                                }
+                                _ => {}
+                            }
+                        }
+                        /*
+                        let typ: String = if let kuzu::Value::String(typ) = &props[0].1 {
+                            typ.to_string()
+                        } else {
+                            "".to_string()
+                        };
+                        let import = if let kuzu::Value::String(import) = &props[1].1 {
+                            Some(import)
+                        } else {
+                            None
+                        };
+                        let alias = if let kuzu::Value::String(alias) = &props[2].1 {
+                            Some(alias)
+                        } else {
+                            None
+                        };
+                        */
+
+                        let parts: Vec<&str> = typ.split('_').collect();
+                        if parts.len() != 2 {
+                            return Err(format!("Invalid relationship type: {}", typ).into());
+                        }
+
+                        let from_node_type: NodeType = parts[0].parse().unwrap();
+                        let to_node_type: NodeType = parts[1].parse().unwrap();
+
+                        // 获取关系类型
+                        let rel_type = rel
+                            .get_label_name()
+                            .to_lowercase()
+                            .parse()
+                            .unwrap_or(EdgeType::Contains);
+
+                        let relationship = Relationship {
+                            r#type: rel_type,
+                            from: Node::from_type_and_name(from_node_type, from_node_name),
+                            to: Node::from_type_and_name(to_node_type, to_node_name),
+                            import: import,
+                            alias: alias,
+                        };
+
+                        relationships.push(relationship);
+                    }
+                    _ => println!("无法识别的关系类型"),
+                }
+            }
+        }
+        Ok(relationships)
+    }
+
+    pub fn delete_nodes(&mut self, names: &Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+        if names.is_empty() {
+            return Ok(());
+        }
+
+        self.init()?;
+
+        if let Some(db) = &self.db {
+            let conn = kuzu::Connection::new(db)?;
+
+            // Delete nodes and all of their relationships
+            // see https://docs.kuzudb.com/cypher/data-manipulation-clauses/delete/#detach-delete.
+            let query = format!("MATCH (n) WHERE n.name IN {:?} DETACH DELETE n", &names,);
+            conn.query(&query)?;
+        }
+
+        Ok(())
+    }
+
     pub fn clean(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(db) = &self.db {
             let conn = kuzu::Connection::new(db)?;
             // Delete all records
-            let _ = conn.query("MATCH (n) DETACH DELETE n;")?;
+            let _ = conn.query("MATCH (n) DETACH DELETE n")?;
         }
         Ok(())
     }
@@ -718,6 +902,59 @@ mod tests {
 
     #[test]
     fn test_query() {}
+
+    #[test]
+    fn test_query_relationships() {
+        let nodes = vec![
+            Node::from_type_and_name(NodeType::File, "file1".to_string()),
+            Node::from_type_and_name(NodeType::Function, "func1".to_string()),
+        ];
+        let rels = vec![Relationship {
+            r#type: EdgeType::Contains,
+            from: Node::from_type_and_name(NodeType::File, "file1".to_string()),
+            to: Node::from_type_and_name(NodeType::Function, "func1".to_string()),
+            import: None,
+            alias: None,
+        }];
+        let mut db = Database::new(PathBuf::from("db"));
+        db.upsert_nodes(&nodes).unwrap();
+        db.upsert_relationships(&rels).unwrap();
+
+        let existing_rels = db
+            .query_relationships("MATCH (a)-[e]->(b) RETURN a.name, b.name, e")
+            .unwrap();
+        let mut relStrings: Vec<_> = existing_rels
+            .into_iter()
+            .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
+            .collect();
+        assert_eq!(relStrings, ["file1-[contains]->func1"],);
+
+        db.clean().unwrap();
+    }
+
+    #[test]
+    fn test_delete_nodes() {
+        let nodes = vec![Node {
+            name: "Node1".to_string(),
+            r#type: NodeType::Function,
+            language: Language::Go,
+            code: "func Node1() {\n    fmt.Println(\"Hello, World!\")\n}".to_string(),
+            skeleton_code: "func Node1() {}".to_string(),
+            start_line: 1,
+            end_line: 1,
+        }];
+        let mut db = Database::new(PathBuf::from("test.db"));
+
+        db.upsert_nodes(&nodes).unwrap();
+        let mut existing_nodes = db.query_nodes("MATCH (n) RETURN n").unwrap();
+        assert_eq!(existing_nodes.len(), 1);
+
+        db.delete_nodes(&vec!["Node1".to_string()]).unwrap();
+        existing_nodes = db.query_nodes("MATCH (n) RETURN n").unwrap();
+        assert_eq!(existing_nodes.len(), 0);
+
+        db.clean().unwrap();
+    }
 
     #[test]
     fn test_write_nodes_to_csv() {
