@@ -245,6 +245,17 @@ pub struct CodeGraph {
     graph: codegraph::CodeGraph,
 }
 
+/// All the interfaces of CodeGraph are synchronous. To avoid block the overall execution
+/// of the Node.js application, it's recommended to call these interfaces in a separate thread
+/// by leveraging Node.js's worker threads.
+///
+/// Note that we did not use `napi::bindgen_prelude::AsyncTask` because it relies on libuv threads,
+/// which do not support Rust's lifetime. As a result, it cannot meet the restriction that Kuzu can
+/// only have one read-write database instance.
+///
+/// References:
+/// - https://napi.rs/docs/concepts/async-task
+/// - https://docs.kuzudb.com/concurrency
 #[napi]
 impl CodeGraph {
     // Args:
@@ -272,18 +283,12 @@ impl CodeGraph {
     }
 
     #[napi]
-    pub fn index(
-        &mut self,
-        path: String,
-        force: bool,
-    ) -> napi::bindgen_prelude::AsyncTask<AsyncIndex> {
-        napi::bindgen_prelude::AsyncTask::new(AsyncIndex {
-            db_path: self.db_path.clone(),
-            repo_path: self.repo_path.clone(),
-            config: self.config.clone(),
-            path: path.clone(),
-            force: force,
-        })
+    pub fn index(&mut self, path: String, force: bool) -> napi::Result<()> {
+        let result = self.graph.index(PathBuf::from(path.clone()), force);
+        match result {
+            Ok(_) => Ok(()),
+            Err(e) => Err(napi::Error::from_reason(format!("Indexing failed: {}", e))),
+        }
     }
 
     #[napi]
@@ -311,44 +316,5 @@ impl CodeGraph {
             Ok(_) => Ok(()),
             Err(e) => Err(napi::Error::from_reason(format!("Cleaning failed: {}", e))),
         }
-    }
-}
-
-/// Make graph.index() asynchronous.
-/// see https://napi.rs/docs/concepts/async-task.
-///
-/// The current implementation is a little bit dirty...
-struct AsyncIndex {
-    db_path: String,
-    repo_path: String,
-    config: Config,
-    path: String,
-    force: bool,
-}
-
-#[napi]
-impl napi::Task for AsyncIndex {
-    type Output = ();
-    type JsValue = napi::JsUndefined;
-
-    fn compute(&mut self) -> napi::Result<Self::Output> {
-        let mut graph = codegraph::CodeGraph::new(
-            PathBuf::from(self.db_path.clone()),
-            PathBuf::from(self.repo_path.clone()),
-            self.config.clone().into(),
-        );
-        match graph.index(PathBuf::from(self.path.clone()), self.force) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(napi::Error::from_reason(format!("Indexing failed: {}", e))),
-        }
-    }
-
-    fn resolve(&mut self, env: napi::Env, output: Self::Output) -> napi::Result<Self::JsValue> {
-        env.get_undefined()
-    }
-
-    fn reject(&mut self, env: napi::Env, err: napi::Error) -> napi::Result<Self::JsValue> {
-        // some cleanup
-        Err(err)
     }
 }

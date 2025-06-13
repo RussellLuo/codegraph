@@ -68,18 +68,20 @@ impl CodeGraph {
         // Otherwise, we assume that the given path is a single file or a small directory.
         // We use the Kuzu's `MERGE` command to upsert (i.e. insert or update) the nodes.
         if path.is_file() {
-            // TODO: find all existing nodes related to the file.
-            //
+            let rel_file_path = path
+                .strip_prefix(self.repo_path.clone())
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .to_string();
+
+            // find all existing nodes related to the file.
             let stmt = format!(
                 r#"
 MATCH (file)-[:CONTAINS*1..2]->(def)
 WHERE file.name = "{}"
 RETURN def;
 "#,
-                path.strip_prefix(self.repo_path.clone())
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .to_string(),
+                &rel_file_path,
             );
             let old_nodes = self.db.query_nodes(stmt.as_str())?;
 
@@ -88,11 +90,37 @@ RETURN def;
             // Delete outdated nodes.
             // Find nodes that exist in old_nodes but not in nodes (outdated nodes to be deleted)
             let node_names_to_delete: Vec<String> = old_nodes
+                .clone()
                 .into_iter()
                 .filter(|old_node| !nodes.contains_key(&old_node.name))
                 .map(|old_node| old_node.name)
                 .collect();
             self.db.delete_nodes(&node_names_to_delete)?;
+
+            // Delete all out-going relationships from the current file node and old nodes.
+            let mut node_names_for_rel_deletion = vec![rel_file_path.clone()];
+            node_names_for_rel_deletion
+                .extend(old_nodes.clone().into_iter().map(|node| node.name.clone()));
+            // Convert node names to a string array for the query. e.g. ["file1", "node1", "node2"]
+            let node_names_array = format!(
+                "[{}]",
+                node_names_for_rel_deletion
+                    .iter()
+                    .map(|name| format!("{:?}", name))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+
+            let stmt = format!(
+                r#"
+MATCH (a)-[e]->()
+WHERE a.name IN {}
+DELETE e;
+"#,
+                &node_names_array,
+            );
+            //println!("delete out-going relationships: {}", stmt);
+            let _ = self.db.query(stmt.as_str())?;
 
             // Upsert the file node first.
             self.db.upsert_nodes(&vec![file_node])?;
@@ -108,7 +136,10 @@ RETURN def;
                 &func_param_types.unwrap(),
                 &mut self.db,
             )?;
-            self.db.bulk_insert_relationships_via_csv(&type_rels)?;
+            //for r in &type_rels {
+            //    println!("type_rel: {}-[{}]{}", r.from.name, r.r#type, r.to.name);
+            //}
+            self.db.upsert_relationships(&type_rels)?;
         } else if path.is_dir() {
             return Err("Not supported yet".into());
         } else {
@@ -153,14 +184,17 @@ MATCH (file)-[:CONTAINS*1..2]->(func)
 MATCH (func)-[:REFERENCES]->(typ)
 WHERE func.start_line < {} AND func.end_line > {}
 OPTIONAL MATCH (typ)-[r:CONTAINS]->(meth)
-RETURN file.name, typ.start_line, typ.end_line, typ.code, COLLECT(meth.skeleton_code) AS methods;
+RETURN typ.name, typ.start_line, typ.end_line, typ.code, COLLECT(meth.skeleton_code) AS methods;
         "#,
             file_path, line, line
         );
         if let Some(result) = self.db.query(stmt.as_str())? {
             for row in result {
                 let path = match &row[0] {
-                    kuzu::Value::String(path) => path.clone(),
+                    kuzu::Value::String(path) => {
+                        let parts: Vec<&str> = path.split(':').collect();
+                        parts[0].clone().to_string()
+                    }
                     _ => "".to_string(),
                 };
                 let start_line = match &row[1] {
@@ -246,15 +280,12 @@ mod tests {
         ]);
         let mut graph = CodeGraph::new(db_path, dir_path.clone(), config);
 
-        match graph.index(dir_path, false) {
-            Err(e) => {
-                println!("Failed to index: {:?}", e);
-            }
-            Ok(_) => {}
-        }
+        graph.clean(true).unwrap();
+        graph.index(dir_path, false).unwrap();
+
         let existing_nodes = graph.query_nodes("MATCH (n) RETURN n".to_string()).unwrap();
         assert_eq!(existing_nodes.len(), 11);
-        let _ = graph.clean(true);
+        graph.clean(true).unwrap();
     }
 
     #[test]
@@ -319,6 +350,7 @@ mod tests {
                 "main.go:User-[contains]->main.go:User.SetAddress",
                 "main.go:User-[contains]->main.go:User.UpdateEmail",
                 "main.go:User.SetAddress-[references]->types.go:Address",
+                "main.go:User.SetAddress-[references]->types.go:Hobby",
                 "types.go-[contains]->types.go:Address",
                 "types.go-[contains]->types.go:Hobby"
             ],
@@ -385,6 +417,7 @@ mod tests {
                 "main.go:User-[contains]->main.go:User.NewUser",
                 "main.go:User-[contains]->main.go:User.SetAddress",
                 "main.go:User-[contains]->main.go:User.UpdateEmail",
+                "main.go:User.SetAddress-[references]->types.go:Hobby",
                 "types.go-[contains]->types.go:Address2",
                 "types.go-[contains]->types.go:Hobby"
             ],
@@ -421,7 +454,6 @@ mod tests {
         let mut graph = CodeGraph::new(db_path, dir_path.clone(), config);
         graph.index(dir_path, false).unwrap();
 
-        //let file_path = "/Users/russellluo/Projects/work/opencsg/projects/starhub-server/builder/store/database/mirror.go".to_string();
         let file_path = "main.go".to_string();
         let line = 37; // SetAddress()
         let result = graph.get_func_param_types(file_path, line);

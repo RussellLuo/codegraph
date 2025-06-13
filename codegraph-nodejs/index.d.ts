@@ -84,7 +84,7 @@ export interface ParseResult {
 }
 export declare class CodeGraph {
   constructor(dbPath: string, repoPath: string, config: Config)
-  index(path: string, force: boolean): Promise<unknown>
+  index(path: string, force: boolean): void
   getFuncParamTypes(filePath: string, line: number): Array<Snippet>
   clean(del: boolean): void
 }

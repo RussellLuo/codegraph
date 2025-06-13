@@ -290,11 +290,12 @@ impl Database {
 
         let temp_dir = tempfile::tempdir()?;
         let temp_dir_path = temp_dir.path();
-        println!(
+        /*println!(
             "save {} nodes in temp_dir: {:?}",
             nodes.len(),
             temp_dir_path
-        );
+        );*/
+        println!("bulk-insert {} nodes", nodes.len());
         self.write_nodes_to_json(nodes, &temp_dir_path)?;
 
         if let Some(db) = &self.db {
@@ -339,11 +340,12 @@ impl Database {
 
         let temp_dir = tempfile::tempdir()?;
         let temp_dir_path = temp_dir.path();
-        println!(
+        /*println!(
             "save {} nodes in temp_dir: {:?}",
             nodes.len(),
             temp_dir_path
-        );
+        );*/
+        println!("bulk-insert {} nodes", nodes.len());
         self.write_nodes_to_csv(nodes, &temp_dir_path)?;
 
         if let Some(db) = &self.db {
@@ -392,11 +394,12 @@ impl Database {
 
         let temp_dir = tempfile::tempdir()?;
         let temp_dir_path = temp_dir.path();
-        println!(
+        /*println!(
             "save {} relationships in temp_dir: {:?}",
             relationships.len(),
             temp_dir_path
-        );
+        );*/
+        println!("bulk-insert {} relationships", relationships.len());
         self.write_relationships_to_json(relationships, &temp_dir_path)?;
 
         if let Some(db) = &self.db {
@@ -457,11 +460,12 @@ impl Database {
 
         let temp_dir = tempfile::tempdir()?;
         let temp_dir_path = temp_dir.path();
-        println!(
+        /*println!(
             "save {} relationships in temp_dir: {:?}",
             relationships.len(),
             temp_dir_path
-        );
+        );*/
+        println!("bulk-insert {} relationships", relationships.len());
         self.write_relationships_to_csv(relationships, &temp_dir_path)?;
 
         if let Some(db) = &self.db {
@@ -492,7 +496,7 @@ impl Database {
                         let from_type = to_title_case(parts[1]);
                         let to_type = to_title_case(parts[2]);
 
-                        // CSV导入需要指定HEADER=true和PARALLEL=false参数
+                        // Quoted newlines are not supported in parallel CSV reader, thus we have to specify PARALLEL=FALSE in the options.
                         let query = format!(
                             r#"COPY {} FROM {:?} (from={:?}, to={:?}, HEADER=true, PARALLEL=false)"#,
                             table_name, file_path, from_type, to_type
@@ -567,6 +571,8 @@ impl Database {
     pub fn upsert_nodes(&mut self, nodes: &Vec<Node>) -> Result<(), Box<dyn std::error::Error>> {
         self.init()?;
 
+        println!("upsert {} nodes", nodes.len());
+
         // 每次需要连接时创建新的连接，避免生命周期问题
         if let Some(db) = &self.db {
             let conn = kuzu::Connection::new(db)?;
@@ -597,6 +603,8 @@ ON MATCH SET {}
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.init()?;
 
+        println!("upsert {} relationships", rels.len());
+
         // 每次需要连接时创建新的连接，避免生命周期问题
         if let Some(db) = &self.db {
             let conn = kuzu::Connection::new(db)?;
@@ -613,20 +621,24 @@ ON MATCH SET {}
                     .filter(|(k, _)| *k != "from" && *k != "to")
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect();
-                let data = Self::to_merge_data(&rel_dict)?;
+                let set_data = Self::to_set_data(&"e", &"", &rel_dict)?;
                 let query = format!(
                     r#"
-                MATCH (a:{}), (b:{})
-                WHERE a.name = '{}' AND b.name = '{}'
-                MERGE (a)-[e:{} {{ {} }}]->(b) RETURN e
+MATCH (a:{}), (b:{})
+WHERE a.name = '{}' AND b.name = '{}'
+MERGE (a)-[e:{}]->(b)
+ON CREATE SET {}
+ON MATCH SET {}
                 "#,
                     from_node_table_name,
                     to_node_table_name,
                     rel.from.name,
                     rel.to.name,
                     table_name,
-                    data
+                    set_data,
+                    set_data,
                 );
+                //println!("upsert_relationships query: {}", query);
                 conn.query(&query)?;
             }
         }
@@ -896,9 +908,7 @@ fn to_title_case(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use std::path::PathBuf;
-    use std::sync::{Arc, Mutex};
 
     #[test]
     fn test_query() {}

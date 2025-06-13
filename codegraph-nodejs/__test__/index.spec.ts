@@ -15,8 +15,8 @@ const config = {
 };
 const graph = new codegraph.CodeGraph(DB_DIR, REPO_DIR, config);
 
-test('parsing nodes', async (t) => {
-  await graph.index(REPO_DIR, false);
+test('parsing nodes', (t) => {
+  graph.index(REPO_DIR, false);
 
   const MAIN_GO = path.join(REPO_DIR, "main.go");
   const snippets = graph.getFuncParamTypes(MAIN_GO, 37);

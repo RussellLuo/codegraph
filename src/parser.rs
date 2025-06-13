@@ -106,7 +106,7 @@ pub struct Parser {
     config: ParserConfig,
     pub nodes: IndexMap<String, Node>,
     relationships: Vec<Relationship>,
-    pub func_param_types: HashMap<String, FuncParamType>, // function name -> parameter types
+    pub func_param_types: HashMap<String, Vec<FuncParamType>>, // function name -> parameter types
     // language-specific properties
     go_module_path: Option<String>,
 }
@@ -159,67 +159,69 @@ impl Parser {
     pub fn resolve_func_param_type_relationships(
         &self,
         nodes: &IndexMap<String, Node>,
-        func_param_types: &HashMap<String, FuncParamType>,
+        func_param_types: &HashMap<String, Vec<FuncParamType>>,
         db: &mut Database,
     ) -> Result<Vec<Relationship>, Box<dyn std::error::Error>> {
         let mut relationships: Vec<Relationship> = Vec::new();
 
-        for (func_name, param_type) in func_param_types {
+        for (func_name, param_types) in func_param_types {
             let func_node = nodes.get(func_name);
             let mut type_node: Option<Node> = None;
 
-            if let Some(package_name) = &param_type.package_name {
-                let stmt = format!(
-                    r#"
-                MATCH (func {{ name: "{}" }})
+            for param_type in param_types {
+                if let Some(package_name) = &param_type.package_name {
+                    let stmt = format!(
+                        r#"
+MATCH (func {{ name: "{}" }})
 MATCH (file {{ type: "file" }})-[:CONTAINS*1..2]->(func)
 MATCH (file)-[imp:IMPORTS]->(pkg)
 MATCH (pkg)-[:CONTAINS*2]->(typ)
 WHERE ("{}" IN [imp.import, imp.alias]) AND "{}" = typ.short_name
 RETURN typ;
-                "#,
-                    func_name,
-                    package_name,
-                    param_type.type_name.to_lowercase()
-                );
-                //println!("Query Stmt: {:}", stmt);
-                let nodes = db.query_nodes(stmt.as_str())?;
-                if nodes.len() != 1 {
-                    continue;
-                }
-                type_node = Some(nodes[0].clone()); // Assuming the query returns exactly one package node
-                                                    //println!("Found type node: {:?}", type_node);
-            } else {
-                let stmt = format!(
-                    r#"
-                MATCH (func {{ name: "{}" }})
+                    "#,
+                        func_name,
+                        package_name,
+                        param_type.type_name.to_lowercase()
+                    );
+                    //println!("Query Stmt: {:}", stmt);
+                    let nodes = db.query_nodes(stmt.as_str())?;
+                    if nodes.len() != 1 {
+                        continue;
+                    }
+                    type_node = Some(nodes[0].clone()); // Assuming the query returns exactly one package node
+                                                        //println!("Found type node: {:?}", type_node);
+                } else {
+                    let stmt = format!(
+                        r#"
+MATCH (func {{ name: "{}" }})
 MATCH (file {{ type: "file" }})-[:CONTAINS*1..2]->(func)
 MATCH (pkg {{ type: "directory" }})-[:CONTAINS]->(file)
 MATCH (pkg)-[:CONTAINS*2]->(typ)
 WHERE "{}" = typ.short_name
 RETURN typ;
-                "#,
-                    func_name,
-                    param_type.type_name.to_lowercase()
-                );
-                //println!("Query Stmt: {:}", stmt);
-                let nodes = db.query_nodes(stmt.as_str())?;
-                if nodes.len() != 1 {
-                    continue;
+                    "#,
+                        func_name,
+                        param_type.type_name.to_lowercase()
+                    );
+                    //println!("Query Stmt: {:}", stmt);
+                    let nodes = db.query_nodes(stmt.as_str())?;
+                    if nodes.len() != 1 {
+                        continue;
+                    }
+                    type_node = Some(nodes[0].clone()); // Assuming the query returns exactly one package node
+                                                        //println!("Found type node: {:?}", type_node);
                 }
-                type_node = Some(nodes[0].clone()); // Assuming the query returns exactly one package node
-                                                    //println!("Found type node: {:?}", type_node);
-            }
 
-            if let (Some(func_node), Some(type_node)) = (func_node, type_node) {
-                let rel = Relationship {
-                    r#type: EdgeType::References,
-                    from: func_node.clone(),
-                    to: type_node.clone(),
-                    import: None,
-                    alias: None,
-                };
-                relationships.push(rel);
+                if let (Some(func_node), Some(type_node)) = (func_node, type_node) {
+                    let rel = Relationship {
+                        r#type: EdgeType::References,
+                        from: func_node.clone(),
+                        to: type_node.clone(),
+                        import: None,
+                        alias: None,
+                    };
+                    relationships.push(rel);
+                }
             }
         }
 
@@ -463,7 +465,7 @@ RETURN typ;
             Node,
             IndexMap<String, Node>,
             Vec<Relationship>,
-            Option<HashMap<String, FuncParamType>>,
+            Option<HashMap<String, Vec<FuncParamType>>>,
         ),
         Box<dyn std::error::Error>,
     > {
@@ -612,7 +614,7 @@ RETURN typ;
         (
             IndexMap<String, Node>,
             Vec<Relationship>,
-            Option<HashMap<String, FuncParamType>>,
+            Option<HashMap<String, Vec<FuncParamType>>>,
         ),
         Box<dyn std::error::Error>,
     > {
@@ -629,7 +631,7 @@ RETURN typ;
 
         let mut nodes: IndexMap<String, Node> = IndexMap::new();
         let mut relationships: Vec<Relationship> = Vec::new();
-        let mut func_param_types: HashMap<String, FuncParamType> = HashMap::new();
+        let mut func_param_types: HashMap<String, Vec<FuncParamType>> = HashMap::new();
 
         let source_code = fs::read(&file_path).expect("Should have been able to read the file");
 
@@ -916,9 +918,9 @@ RETURN typ;
         &self,
         from_node_name: &String,
         source_code: &[u8],
-    ) -> Result<HashMap<String, FuncParamType>, Box<dyn std::error::Error>> {
-        let mut func_param_types: HashMap<String, FuncParamType> = HashMap::new(); // function name -> parameter types
-                                                                                   //
+    ) -> Result<HashMap<String, Vec<FuncParamType>>, Box<dyn std::error::Error>> {
+        let mut func_param_types: HashMap<String, Vec<FuncParamType>> = HashMap::new(); // function name -> parameter types
+                                                                                        //
         let query_source = GO_FUNC_PARAMS_QUERY_SOURCE.to_string();
         let mut parser = tree_sitter::Parser::new();
         let language = &tree_sitter_go::LANGUAGE.into();
@@ -973,13 +975,13 @@ RETURN typ;
 
                 if !util::is_go_builtin_type(&type_name) {
                     // Save the types referenced by the currrent function/method.
-                    func_param_types.insert(
-                        from_node_name.clone(),
-                        FuncParamType {
+                    func_param_types
+                        .entry(from_node_name.clone())
+                        .or_insert_with(Vec::new)
+                        .push(FuncParamType {
                             type_name,
                             package_name,
-                        },
-                    );
+                        });
                 }
             }
         }

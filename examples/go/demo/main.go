@@ -34,7 +34,7 @@ func (u *User) UpdateEmail(newEmail string) {
 	fmt.Printf("Email updated to: %s\n", newEmail)
 }
 
-func (u *User) SetAddress(addr *Address) {
+func (u *User) SetAddress(addr *Address, hobby *Hobby) {
 	u.Address = addr
 }
 
