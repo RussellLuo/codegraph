@@ -1,6 +1,6 @@
 {
   "name": "@codegraph-js/codegraph-win32-x64-msvc",
-  "version": "0.0.1-beta.0",
+  "version": "0.0.1-beta.1",
   "os": [
     "win32"
   ],
