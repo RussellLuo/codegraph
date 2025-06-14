@@ -12,6 +12,8 @@ const config = {
   ],
 };
 
+codegraph.initLogger(codegraph.LogLevel.Info);
+
 const graph = new codegraph.CodeGraph(DB_DIR, REPO_DIR, config);
 graph.index(REPO_DIR, false);
 

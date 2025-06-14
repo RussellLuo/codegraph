@@ -1,3 +1,4 @@
+use log;
 use pathdiff;
 use std::path::PathBuf;
 
@@ -119,7 +120,7 @@ DELETE e;
 "#,
                 &node_names_array,
             );
-            //println!("delete out-going relationships: {}", stmt);
+            log::debug!("delete out-going relationships: {}", stmt);
             let _ = self.db.query(stmt.as_str())?;
 
             // Upsert the file node first.
@@ -136,9 +137,13 @@ DELETE e;
                 &func_param_types.unwrap(),
                 &mut self.db,
             )?;
-            //for r in &type_rels {
-            //    println!("type_rel: {}-[{}]{}", r.from.name, r.r#type, r.to.name);
-            //}
+
+            if log::log_enabled!(log::Level::Debug) {
+                for r in &type_rels {
+                    log::debug!("type_rel: {}-[{}]{}", r.from.name, r.r#type, r.to.name);
+                }
+            }
+
             self.db.upsert_relationships(&type_rels)?;
         } else if path.is_dir() {
             return Err("Not supported yet".into());

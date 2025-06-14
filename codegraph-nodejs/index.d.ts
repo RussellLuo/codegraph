@@ -72,16 +72,19 @@ export interface Config {
   ignorePatterns?: Array<string>
   /** Whether to use .gitignore files found in directories (default is true) */
   useGitignoreFiles?: boolean
-  /**
-   * Output directory for saving parsed nodes as JSON file (default is None)
-   * If specified, the parsed nodes will be written to a JSON file in this directory
-   */
-  outDir?: string
 }
 export interface ParseResult {
   nodes: Array<Node>
   relationships: Array<Relationship>
 }
+export const enum LogLevel {
+  Error = 'Error',
+  Warn = 'Warn',
+  Info = 'Info',
+  Debug = 'Debug',
+  Trace = 'Trace'
+}
+export declare function initLogger(logLevel: LogLevel): void
 export declare class CodeGraph {
   constructor(dbPath: string, repoPath: string, config: Config)
   index(path: string, force: boolean): void

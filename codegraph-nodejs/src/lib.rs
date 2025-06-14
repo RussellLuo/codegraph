@@ -198,9 +198,6 @@ pub struct Config {
     pub ignore_patterns: Option<Vec<String>>,
     /// Whether to use .gitignore files found in directories (default is true)
     pub use_gitignore_files: Option<bool>,
-    /// Output directory for saving parsed nodes as JSON file (default is None)
-    /// If specified, the parsed nodes will be written to a JSON file in this directory
-    pub out_dir: Option<String>,
 }
 
 impl Into<codegraph::Config> for Config {
@@ -223,9 +220,6 @@ impl Into<codegraph::Config> for Config {
         }
         if let Some(use_gitignore_files) = self.use_gitignore_files {
             cfg = cfg.use_gitignore_files(use_gitignore_files);
-        }
-        if let Some(out_dir) = self.out_dir {
-            cfg = cfg.out_dir(out_dir);
         }
         cfg
     }
@@ -317,4 +311,34 @@ impl CodeGraph {
             Err(e) => Err(napi::Error::from_reason(format!("Cleaning failed: {}", e))),
         }
     }
+}
+
+#[napi(string_enum)]
+pub enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+impl Into<log::LevelFilter> for LogLevel {
+    fn into(self) -> log::LevelFilter {
+        match self {
+            LogLevel::Error => log::LevelFilter::Error,
+            LogLevel::Warn => log::LevelFilter::Warn,
+            LogLevel::Info => log::LevelFilter::Info,
+            LogLevel::Debug => log::LevelFilter::Debug,
+            LogLevel::Trace => log::LevelFilter::Trace,
+        }
+    }
+}
+
+#[napi]
+pub fn init_logger(log_level: LogLevel) {
+    let mut builder = env_logger::Builder::new();
+    // Set the log level
+    builder.filter_level(log_level.into());
+    // Use try_init to avoid panicking if the logger is already initialized.
+    let _ = builder.try_init();
 }

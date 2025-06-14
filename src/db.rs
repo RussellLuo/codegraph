@@ -1,6 +1,7 @@
 use crate::{EdgeType, Language, Node, NodeType, Relationship};
 use indexmap::IndexMap;
 use kuzu;
+use log;
 use serde_json;
 use std::collections::HashMap;
 use std::path::Path;
@@ -290,12 +291,12 @@ impl Database {
 
         let temp_dir = tempfile::tempdir()?;
         let temp_dir_path = temp_dir.path();
-        /*println!(
+        log::debug!(
             "save {} nodes in temp_dir: {:?}",
             nodes.len(),
             temp_dir_path
-        );*/
-        println!("bulk-insert {} nodes", nodes.len());
+        );
+        log::info!("bulk-insert {} nodes", nodes.len());
         self.write_nodes_to_json(nodes, &temp_dir_path)?;
 
         if let Some(db) = &self.db {
@@ -340,12 +341,12 @@ impl Database {
 
         let temp_dir = tempfile::tempdir()?;
         let temp_dir_path = temp_dir.path();
-        /*println!(
+        log::debug!(
             "save {} nodes in temp_dir: {:?}",
             nodes.len(),
             temp_dir_path
-        );*/
-        println!("bulk-insert {} nodes", nodes.len());
+        );
+        log::info!("bulk-insert {} nodes", nodes.len());
         self.write_nodes_to_csv(nodes, &temp_dir_path)?;
 
         if let Some(db) = &self.db {
@@ -394,12 +395,12 @@ impl Database {
 
         let temp_dir = tempfile::tempdir()?;
         let temp_dir_path = temp_dir.path();
-        /*println!(
+        log::debug!(
             "save {} relationships in temp_dir: {:?}",
             relationships.len(),
             temp_dir_path
-        );*/
-        println!("bulk-insert {} relationships", relationships.len());
+        );
+        log::info!("bulk-insert {} relationships", relationships.len());
         self.write_relationships_to_json(relationships, &temp_dir_path)?;
 
         if let Some(db) = &self.db {
@@ -436,8 +437,8 @@ impl Database {
                         );
                         match conn.query(query.as_str()) {
                             Err(e) => {
-                                println!("Failed to copy file {} :{}", file_path.display(), e);
-                                println!("Error query: {}", query);
+                                log::error!("Failed to copy file {} :{}", file_path.display(), e);
+                                log::error!("Error query: {}", query);
                             }
                             Ok(_) => {}
                         }
@@ -460,12 +461,12 @@ impl Database {
 
         let temp_dir = tempfile::tempdir()?;
         let temp_dir_path = temp_dir.path();
-        /*println!(
+        log::debug!(
             "save {} relationships in temp_dir: {:?}",
             relationships.len(),
             temp_dir_path
-        );*/
-        println!("bulk-insert {} relationships", relationships.len());
+        );
+        log::info!("bulk-insert {} relationships", relationships.len());
         self.write_relationships_to_csv(relationships, &temp_dir_path)?;
 
         if let Some(db) = &self.db {
@@ -571,7 +572,7 @@ impl Database {
     pub fn upsert_nodes(&mut self, nodes: &Vec<Node>) -> Result<(), Box<dyn std::error::Error>> {
         self.init()?;
 
-        println!("upsert {} nodes", nodes.len());
+        log::info!("upsert {} nodes", nodes.len());
 
         // 每次需要连接时创建新的连接，避免生命周期问题
         if let Some(db) = &self.db {
@@ -589,7 +590,7 @@ ON MATCH SET {}
 "#,
                     table_name, node.name, set_data, set_data
                 );
-                //println!("upsert_nodes query: {}", query);
+                log::debug!("upsert_nodes query: {}", query);
                 conn.query(query.as_str())?;
             }
         }
@@ -603,7 +604,7 @@ ON MATCH SET {}
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.init()?;
 
-        println!("upsert {} relationships", rels.len());
+        log::info!("upsert {} relationships", rels.len());
 
         // 每次需要连接时创建新的连接，避免生命周期问题
         if let Some(db) = &self.db {
@@ -638,7 +639,7 @@ ON MATCH SET {}
                     set_data,
                     set_data,
                 );
-                //println!("upsert_relationships query: {}", query);
+                log::debug!("upsert_relationships query: {}", query);
                 conn.query(&query)?;
             }
         }

@@ -44,9 +44,6 @@ pub struct ParserConfig {
     pub ignore_patterns: Vec<String>,
     /// Whether to use .gitignore files found in directories (default is true)
     pub use_gitignore_files: bool,
-    /// Output directory for saving parsed nodes as JSON file (default is None)
-    /// If specified, the parsed nodes will be written to a JSON file in this directory
-    pub out_dir: Option<String>,
 }
 
 impl Default for ParserConfig {
@@ -58,7 +55,6 @@ impl Default for ParserConfig {
             continue_on_error: false,
             ignore_patterns: Vec::new(),
             use_gitignore_files: true,
-            out_dir: None,
         }
     }
 }
@@ -86,12 +82,6 @@ impl ParserConfig {
     }
     pub fn use_gitignore_files(mut self, use_gitignore_files: bool) -> Self {
         self.use_gitignore_files = use_gitignore_files;
-        self
-    }
-
-    /// 设置输出目录，用于保存解析后的节点JSON文件
-    pub fn out_dir(mut self, out_dir: String) -> Self {
-        self.out_dir = Some(out_dir);
         self
     }
 }
@@ -140,20 +130,8 @@ impl Parser {
         self.traverse_directory(&dir_path)?;
         let nodes: Vec<Node> = self.nodes.values().cloned().collect();
 
-        // If output directory is specified, write parsed results to JSON files
-        if let Some(ref out_dir) = self.config.out_dir {
-            let nodes_dir = PathBuf::from(out_dir).join("nodes");
-            let rels_dir = PathBuf::from(out_dir).join("relationships");
-            std::fs::create_dir_all(&nodes_dir)?;
-            std::fs::create_dir_all(&rels_dir)?;
-            //self.write_nodes_to_json(&nodes, nodes_dir.to_str().unwrap())?;
-            //self.write_relationships_to_json(&self.relationships, rels_dir.to_str().unwrap())?;
-
-            Ok((vec![], vec![]))
-        } else {
-            // Return references to parsed nodes and relationships
-            Ok((nodes, self.relationships.clone()))
-        }
+        // Return references to parsed nodes and relationships
+        Ok((nodes, self.relationships.clone()))
     }
 
     pub fn resolve_func_param_type_relationships(
@@ -183,7 +161,7 @@ RETURN typ;
                         package_name,
                         param_type.type_name.to_lowercase()
                     );
-                    //println!("Query Stmt: {:}", stmt);
+                    log::trace!("Query Stmt: {:}", stmt);
                     let nodes = db.query_nodes(stmt.as_str())?;
                     if nodes.len() != 1 {
                         continue;
@@ -203,7 +181,7 @@ RETURN typ;
                         func_name,
                         param_type.type_name.to_lowercase()
                     );
-                    //println!("Query Stmt: {:}", stmt);
+                    log::trace!("Query Stmt: {:}", stmt);
                     let nodes = db.query_nodes(stmt.as_str())?;
                     if nodes.len() != 1 {
                         continue;
@@ -551,13 +529,13 @@ RETURN typ;
             let capture_name = query.capture_names()[capture.index as usize];
             let pos_start = capture.node.start_position();
             let pos_end = capture.node.end_position();
-            /*println!(
+            log::trace!(
                 "[CAPTURE]\nname: {capture_name}, start: {}, end: {}, text: {:?}, capture: {:?}",
                 pos_start,
                 pos_end,
                 capture.node.utf8_text(&source_code).unwrap_or(""),
                 capture.node.to_sexp()
-            );*/
+            );
 
             match capture_name {
                 "definition.class.name" => {
@@ -659,15 +637,15 @@ RETURN typ;
         while let Some((mat, capture_index)) = captures.next() {
             let capture = mat.captures[*capture_index];
             let capture_name = query.capture_names()[capture.index as usize];
-            /*let pos_start = capture.node.start_position();
+            let pos_start = capture.node.start_position();
             let pos_end = capture.node.end_position();
-            println!(
+            log::trace!(
                 "[CAPTURE]\nname: {capture_name}, start: {}, end: {}, text: {:?}, capture: {:?}",
                 pos_start,
                 pos_end,
                 capture.node.utf8_text(&source_code).unwrap_or(""),
                 capture.node.to_sexp()
-            );*/
+            );
 
             match capture_name {
                 "reference.import.path" => {
@@ -941,13 +919,13 @@ RETURN typ;
             let capture_name = query.capture_names()[capture.index as usize];
             let pos_start = capture.node.start_position();
             let pos_end = capture.node.end_position();
-            /*println!(
+            log::trace!(
                 "[CAPTURE]\nname: {capture_name}, start: {}, end: {}, text: {:?}, capture: {:?}",
                 pos_start,
                 pos_end,
                 capture.node.utf8_text(&source_code).unwrap_or_default(),
                 capture.node.to_sexp()
-            );*/
+            );
 
             if capture_name == "param_type" {
                 let node_name: String = capture
@@ -1000,11 +978,9 @@ mod tests {
         // Create test file
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let dir_path = PathBuf::from(manifest_dir).join("examples").join("python");
-        //let out_dir = dir_path.join("temp_out").to_str().unwrap().to_string();
 
         let config =
             ParserConfig::default().ignore_patterns(vec!["*".to_string(), "!d.py".to_string()]);
-        //.out_dir(out_dir);
         let mut parser = Parser::new(dir_path.clone(), config);
         let result = parser.parse(dir_path);
         match result {
