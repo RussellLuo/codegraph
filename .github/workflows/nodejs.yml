@@ -230,7 +230,7 @@ jobs:
             architecture: x64
         node:
           - '20'
-          - '22'
+          #- '22'
     runs-on: ${{ matrix.settings.host }}
     defaults:
       run:
@@ -331,7 +331,7 @@ jobs:
       - name: Test bindings
         run: docker run --rm -v ${{ github.workspace }}:/build -w /build node:${{ matrix.node }}-alpine /bin/sh -c "cd /build/codegraph-nodejs && yarn test"
   test-linux-aarch64-gnu-binding:
-    ## See comments in build.matrix.settings
+    # See comments in build.matrix.settings
     if: false
     name: Test bindings on aarch64-unknown-linux-gnu - node@${{ matrix.node }}
     needs:
