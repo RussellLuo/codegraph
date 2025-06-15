@@ -23,9 +23,10 @@ test('parsing nodes', (t) => {
 
   let types: string[] = [];
   for (let s of snippets) {
-    types.push(`--> ${s.path}:${s.startLine}:${s.endLine}`);
+    types.push(`${s.path}:${s.startLine}:${s.endLine}`);
   }
-  t.deepEqual(types, ['main.go:3:6'], 'unexpected definitions');
+  types.sort();
+  t.deepEqual(types, ['types.go:3:6', 'types.go:8:11'], 'unexpected types');
 
   graph.clean(true);
 })
