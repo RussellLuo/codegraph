@@ -27,48 +27,48 @@ jobs:
           - host: macos-latest
             target: x86_64-apple-darwin
             build: yarn build --target x86_64-apple-darwin
+          - host: windows-latest
+            build: yarn build --target x86_64-pc-windows-msvc
+            target: x86_64-pc-windows-msvc
+          ## Commented out since kuzu cannot be compiled.
           ##- host: windows-latest
-          ##  build: yarn build --target x86_64-pc-windows-msvc
-          ##  target: x86_64-pc-windows-msvc
-          # Commented out since kuzu cannot be compiled.
-          #- host: windows-latest
-          #  build: yarn build --target i686-pc-windows-msvc
-          #  target: i686-pc-windows-msvc
+          ##  build: yarn build --target i686-pc-windows-msvc
+          ##  target: i686-pc-windows-msvc
           # See issue: https://github.com/RussellLuo/codegraph/actions/runs/15302983282/job/43048838251
           #- host: ubuntu-latest
           #  target: x86_64-unknown-linux-gnu
           #  docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
           #  build: yarn build --target x86_64-unknown-linux-gnu
-          # Commented out since kuzu cannot be compiled.
-          #- host: ubuntu-latest
-          #  target: x86_64-unknown-linux-musl
-          #  docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
-          #  build: yarn build --target x86_64-unknown-linux-musl
-          ##- host: macos-latest
-          ##  target: aarch64-apple-darwin
-          ##  build: yarn build --target aarch64-apple-darwin
+          ## Commented out since kuzu cannot be compiled.
+          ##- host: ubuntu-latest
+          ##  target: x86_64-unknown-linux-musl
+          ##  docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
+          ##  build: yarn build --target x86_64-unknown-linux-musl
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            build: yarn build --target aarch64-apple-darwin
           # See issue: https://github.com/RussellLuo/codegraph/actions/runs/15302983282/job/43048838255
           #- host: ubuntu-latest
           #  target: aarch64-unknown-linux-gnu
           #  docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
           #  build: yarn build --target aarch64-unknown-linux-gnu
-          # Commented out since kuzu cannot be compiled.
-          #- host: ubuntu-latest
-          #  target: armv7-unknown-linux-gnueabihf
-          #  setup: |
-          #    sudo apt-get update
-          #    sudo apt-get install gcc-arm-linux-gnueabihf -y
-          #  build: yarn build --target armv7-unknown-linux-gnueabihf
-          # Commented out since kuzu cannot be compiled.
-          #- host: ubuntu-latest
-          #  target: armv7-unknown-linux-musleabihf
-          #  build: yarn build --target armv7-unknown-linux-musleabihf
+          ## Commented out since kuzu cannot be compiled.
           ##- host: ubuntu-latest
-          ##  target: aarch64-linux-android
-          ##  build: yarn build --target aarch64-linux-android
+          ##  target: armv7-unknown-linux-gnueabihf
+          ##  setup: |
+          ##    sudo apt-get update
+          ##    sudo apt-get install gcc-arm-linux-gnueabihf -y
+          ##  build: yarn build --target armv7-unknown-linux-gnueabihf
+          ## Commented out since kuzu cannot be compiled.
           ##- host: ubuntu-latest
-          ##  target: armv7-linux-androideabi
-          ##  build: yarn build --target armv7-linux-androideabi
+          ##  target: armv7-unknown-linux-musleabihf
+          ##  build: yarn build --target armv7-unknown-linux-musleabihf
+          - host: ubuntu-latest
+            target: aarch64-linux-android
+            build: yarn build --target aarch64-linux-android
+          - host: ubuntu-latest
+            target: armv7-linux-androideabi
+            build: yarn build --target armv7-linux-androideabi
           # Commented out since kuzu cannot be compiled.
           #- host: ubuntu-latest
           #  target: aarch64-unknown-linux-musl
@@ -158,7 +158,7 @@ jobs:
           path: codegraph-nodejs/${{ env.APP_NAME }}.*.node
           if-no-files-found: error
   build-freebsd:
-    # Commented out since kuzu cannot be compiled.
+    ## Commented out since kuzu cannot be compiled.
     if: false
     runs-on: ubuntu-latest
     name: Build FreeBSD
@@ -293,9 +293,11 @@ jobs:
       - name: Test bindings
         run: docker run --rm -v ${{ github.workspace }}:/build -w /build node:${{ matrix.node }}-slim /bin/sh -c "cd /build/codegraph-nodejs && yarn test"
   test-linux-x64-musl-binding:
+    ## Commented out since kuzu cannot be compiled.
+    if: false
     name: Test bindings on x86_64-unknown-linux-musl - node@${{ matrix.node }}
-    #needs:
-    #  - build
+    needs:
+      - build
     strategy:
       fail-fast: false
       matrix:
@@ -329,7 +331,7 @@ jobs:
       - name: Test bindings
         run: docker run --rm -v ${{ github.workspace }}:/build -w /build node:${{ matrix.node }}-alpine /bin/sh -c "cd /build/codegraph-nodejs && yarn test"
   test-linux-aarch64-gnu-binding:
-    # See comments in build.matrix.settings
+    ## See comments in build.matrix.settings
     if: false
     name: Test bindings on aarch64-unknown-linux-gnu - node@${{ matrix.node }}
     needs:
@@ -375,9 +377,11 @@ jobs:
             yarn test
             ls -la
   test-linux-aarch64-musl-binding:
+    ## Commented out since kuzu cannot be compiled.
+    if: false
     name: Test bindings on aarch64-unknown-linux-musl - node@lts
-    #needs:
-    #  - build
+    needs:
+      - build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -412,9 +416,11 @@ jobs:
             set -e
             yarn test
   test-linux-arm-gnueabihf-binding:
+    ## Commented out since kuzu cannot be compiled.
+    if: false
     name: Test bindings on armv7-unknown-linux-gnueabihf - node@${{ matrix.node }}
-    #needs:
-    #  - build
+    needs:
+      - build
     strategy:
       fail-fast: false
       matrix:
