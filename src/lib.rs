@@ -267,7 +267,15 @@ RETURN typ.name, typ.start_line, typ.end_line, typ.code, COLLECT(meth.skeleton_c
 #[cfg(test)]
 mod tests {
     use super::*;
+    use log::LevelFilter;
     use std::path::{Path, PathBuf};
+
+    fn init() {
+        let _ = env_logger::builder()
+            .filter_level(LevelFilter::Info)
+            .is_test(true)
+            .try_init();
+    }
 
     #[test]
     fn test_index() {
@@ -295,6 +303,8 @@ mod tests {
 
     #[test]
     fn test_index_upsert_file() {
+        init();
+
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let repo_path = PathBuf::from(manifest_dir)
             .join("examples")

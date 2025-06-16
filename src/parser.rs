@@ -1,6 +1,6 @@
 use glob::Pattern;
 use indexmap::IndexMap;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -142,63 +142,62 @@ impl Parser {
     ) -> Result<Vec<Relationship>, Box<dyn std::error::Error>> {
         let mut relationships: Vec<Relationship> = Vec::new();
 
+        let mut pkg_types: IndexMap<String, HashSet<String>> = IndexMap::new();
+        for (func_name, param_types) in func_param_types {
+            for param_type in param_types {
+                if let Some(package_name) = &param_type.package_name {
+                    pkg_types
+                        .entry(package_name.clone())
+                        .or_insert_with(HashSet::new)
+                        .insert(param_type.type_name.clone());
+                };
+            }
+        }
+
+        let mut pkgtype_to_node = IndexMap::new(); // "{pkg_name}:{type_name}" => type_node
+        for (pkg_name, type_names) in pkg_types {
+            let quoted_type_names: Vec<String> = type_names
+                .iter()
+                .map(|s| format!("\"{}\"", s.to_lowercase()))
+                .collect();
+            let type_names_str = format!("[{}]", quoted_type_names.join(", "));
+            let stmt = format!(
+                r#"
+MATCH (pkg {{ name: "{}" }})
+MATCH (pkg)-[:CONTAINS*2]->(typ)
+WHERE typ.short_name IN {}
+RETURN typ;
+                "#,
+                pkg_name, type_names_str,
+            );
+            log::trace!("Query Stmt: {:}", stmt);
+            let nodes = db.query_nodes(stmt.as_str())?;
+
+            for node in &nodes {
+                pkgtype_to_node.insert(format!("{}:{}", pkg_name, node.short_name()), node.clone());
+            }
+        }
+
         for (func_name, param_types) in func_param_types {
             let func_node = nodes.get(func_name);
-            let mut type_node: Option<Node> = None;
 
             for param_type in param_types {
                 if let Some(package_name) = &param_type.package_name {
-                    let stmt = format!(
-                        r#"
-MATCH (func {{ name: "{}" }})
-MATCH (file {{ type: "file" }})-[:CONTAINS*1..2]->(func)
-MATCH (file)-[imp:IMPORTS]->(pkg)
-MATCH (pkg)-[:CONTAINS*2]->(typ)
-WHERE ("{}" IN [imp.import, imp.alias]) AND "{}" = typ.short_name
-RETURN typ;
-                    "#,
-                        func_name,
+                    let mut type_node = pkgtype_to_node.get(&format!(
+                        "{}:{}",
                         package_name,
                         param_type.type_name.to_lowercase()
-                    );
-                    log::trace!("Query Stmt: {:}", stmt);
-                    let nodes = db.query_nodes(stmt.as_str())?;
-                    if nodes.len() != 1 {
-                        continue;
+                    ));
+                    if let (Some(func_node), Some(type_node)) = (func_node, type_node) {
+                        let rel = Relationship {
+                            r#type: EdgeType::References,
+                            from: func_node.clone(),
+                            to: type_node.clone(),
+                            import: None,
+                            alias: None,
+                        };
+                        relationships.push(rel);
                     }
-                    type_node = Some(nodes[0].clone()); // Assuming the query returns exactly one package node
-                                                        //println!("Found type node: {:?}", type_node);
-                } else {
-                    let stmt = format!(
-                        r#"
-MATCH (func {{ name: "{}" }})
-MATCH (file {{ type: "file" }})-[:CONTAINS*1..2]->(func)
-MATCH (pkg {{ type: "directory" }})-[:CONTAINS]->(file)
-MATCH (pkg)-[:CONTAINS*2]->(typ)
-WHERE "{}" = typ.short_name
-RETURN typ;
-                    "#,
-                        func_name,
-                        param_type.type_name.to_lowercase()
-                    );
-                    log::trace!("Query Stmt: {:}", stmt);
-                    let nodes = db.query_nodes(stmt.as_str())?;
-                    if nodes.len() != 1 {
-                        continue;
-                    }
-                    type_node = Some(nodes[0].clone()); // Assuming the query returns exactly one package node
-                                                        //println!("Found type node: {:?}", type_node);
-                }
-
-                if let (Some(func_node), Some(type_node)) = (func_node, type_node) {
-                    let rel = Relationship {
-                        r#type: EdgeType::References,
-                        from: func_node.clone(),
-                        to: type_node.clone(),
-                        import: None,
-                        alias: None,
-                    };
-                    relationships.push(rel);
                 }
             }
         }
@@ -673,6 +672,7 @@ RETURN typ;
                             &go_module_path,
                             &mod_import_path,
                         );
+
                         if let Some(mod_file_path) = mod_file_path {
                             let parts: Vec<&str> = mod_import_path.rsplitn(2, '/').collect();
                             let mod_name = parts.first().unwrap_or(&""); // get module name
@@ -719,6 +719,7 @@ RETURN typ;
                                     .unwrap_or_default()
                                     .to_string()
                                     .as_bytes(),
+                                &relationships,
                             )?;
                             for (k, v) in param_types {
                                 func_param_types.insert(k, v);
@@ -882,6 +883,7 @@ RETURN typ;
                         .unwrap_or_default()
                         .to_string()
                         .as_bytes(),
+                    &relationships,
                 )?;
                 for (k, v) in param_types {
                     func_param_types.insert(k, v);
@@ -896,9 +898,10 @@ RETURN typ;
         &self,
         from_node_name: &String,
         source_code: &[u8],
+        import_relationships: &Vec<Relationship>,
     ) -> Result<HashMap<String, Vec<FuncParamType>>, Box<dyn std::error::Error>> {
         let mut func_param_types: HashMap<String, Vec<FuncParamType>> = HashMap::new(); // function name -> parameter types
-                                                                                        //
+
         let query_source = GO_FUNC_PARAMS_QUERY_SOURCE.to_string();
         let mut parser = tree_sitter::Parser::new();
         let language = &tree_sitter_go::LANGUAGE.into();
@@ -933,6 +936,18 @@ RETURN typ;
                     .utf8_text(&source_code)
                     .unwrap_or("")
                     .to_string();
+
+                // Skip the inline type definitions
+                // `f func (...) ...`
+                // `s struct { ... }`
+                // `iface interface { ... }`
+                if node_name.starts_with("func")
+                    || node_name.starts_with("struct")
+                    || node_name.starts_with("interface")
+                {
+                    continue;
+                }
+
                 // Do conversion:
                 // foo.Foo = > foo.Foo
                 // Foo => Foo
@@ -951,6 +966,34 @@ RETURN typ;
                     _ => unreachable!(),
                 };
 
+                let mut real_package_name: Option<String> = None;
+                // Find the target package name that the type belongs to.
+                if let Some(package_name) = &package_name {
+                    for rel in import_relationships {
+                        if let Some(import) = &rel.import {
+                            if import == package_name {
+                                real_package_name = Some(rel.to.name.clone());
+                                break;
+                            }
+                        }
+                        if let Some(alias) = &rel.alias {
+                            if alias == package_name {
+                                real_package_name = Some(rel.to.name.clone());
+                                break;
+                            }
+                        }
+                    }
+
+                    // If the package name is not found, leave it as None.
+                } else {
+                    // Otherwise, the type is defined in the same package as the current file.
+                    let mut parent_dir_path = from_node_name.rsplitn(2, '/').nth(1).unwrap_or("");
+                    if parent_dir_path.is_empty() {
+                        parent_dir_path = ".";
+                    }
+                    real_package_name = Some(parent_dir_path.to_string());
+                }
+
                 if !util::is_go_builtin_type(&type_name) {
                     // Save the types referenced by the currrent function/method.
                     func_param_types
@@ -958,7 +1001,7 @@ RETURN typ;
                         .or_insert_with(Vec::new)
                         .push(FuncParamType {
                             type_name,
-                            package_name,
+                            package_name: real_package_name,
                         });
                 }
             }

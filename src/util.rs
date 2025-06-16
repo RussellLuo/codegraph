@@ -76,3 +76,21 @@ fn get_go_path() -> Result<String, Box<dyn std::error::Error>> {
 
     Ok(go_root)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_get_repo_module_file_path() {
+        let repo_path = PathBuf::from("/home/user/repo");
+        let repo_mod_path = "github.com/user/repo".to_string();
+        let mod_import_path = "github.com/user/repo/pkg/module".to_string();
+        let expected_path = PathBuf::from("/home/user/repo/pkg/module");
+        assert_eq!(
+            get_repo_module_file_path(&repo_path, &repo_mod_path, &mod_import_path),
+            Some(expected_path)
+        );
+    }
+}
