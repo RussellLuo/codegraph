@@ -279,6 +279,8 @@ mod tests {
 
     #[test]
     fn test_index() {
+        init();
+
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let dir_path = PathBuf::from(manifest_dir)
             .join("examples")
@@ -302,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn test_index_upsert_file() {
+    fn test_upsert_file() {
         init();
 
         let manifest_dir = env!("CARGO_MANIFEST_DIR");

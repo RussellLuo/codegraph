@@ -1,3 +1,4 @@
+; Pattern 0: Import Declarations
 (import_declaration
   [
     (import_spec_list
@@ -7,6 +8,7 @@
   ]
 )
 
+; Pattern 1: Interface Declarations
 (type_declaration (
   (type_spec
     name: (type_identifier) @definition.interface.name
@@ -14,6 +16,7 @@
   ) @definition.interface
 ))
 
+; Pattern 2: Class Declarations (i.e. Go Structs)
 (type_declaration (
   (type_spec
     name: (type_identifier) @definition.class.name
@@ -21,9 +24,21 @@
   ) @definition.class
 ))
 
+; Pattern 3: Function Declarations
 (function_declaration
   name: (identifier) @definition.function.name
-  parameters: (parameter_list)
+  parameters: (
+    (parameter_list
+      [
+        (parameter_declaration
+          type: (_) @definition.function.param_type
+        )?
+        (variadic_parameter_declaration
+          type: (_) @definition.function.param_type
+        )?
+      ]
+    )
+  )
   result: [
     (parameter_list
       (parameter_declaration
@@ -43,6 +58,7 @@
   body: (block) @definition.function.body
 ) @definition.function
 
+; Pattern 4: Method Declarations
 (method_declaration
   receiver: (parameter_list (
     parameter_declaration
@@ -52,5 +68,17 @@
       ]
   ))
   name: (field_identifier) @definition.method.name
+  parameters: (
+    (parameter_list
+      [
+        (parameter_declaration
+          type: (_) @definition.method.param_type
+        )?
+        (variadic_parameter_declaration
+          type: (_) @definition.method.param_type
+        )?
+      ]
+    )
+  )
   body: (block) @definition.method.body
 ) @definition.method
