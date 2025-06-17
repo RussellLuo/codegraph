@@ -7,6 +7,7 @@ export const enum NodeType {
   Unparsed = 'Unparsed',
   Directory = 'Directory',
   File = 'File',
+  Interface = 'Interface',
   Class = 'Class',
   Function = 'Function'
 }

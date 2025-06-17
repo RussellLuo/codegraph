@@ -694,7 +694,10 @@ RETURN typ;
                         }
                     }
                 }
-                "definition.class" | "definition.function" | "definition.method" => {
+                "definition.interface"
+                | "definition.class"
+                | "definition.function"
+                | "definition.method" => {
                     if let Some(ref mut prev_node) = current_node.take() {
                         if let Some(parent_struct_name) = &parent_struct_name {
                             let node_name = prev_node.name.rsplit(':').next().unwrap_or("");
@@ -755,6 +758,7 @@ RETURN typ;
                     }
 
                     let node_type = match capture_name {
+                        "definition.interface" => NodeType::Interface,
                         "definition.class" => NodeType::Class,
                         "definition.function" => NodeType::Function,
                         "definition.method" => NodeType::Function,
@@ -776,7 +780,10 @@ RETURN typ;
                     current_tree_sitter_main_node = Some(capture.node);
                     //println!("Create a new node: {:?}", current_node);
                 }
-                "definition.class.name" | "definition.function.name" | "definition.method.name" => {
+                "definition.interface.name"
+                | "definition.class.name"
+                | "definition.function.name"
+                | "definition.method.name" => {
                     let node_name: String = capture
                         .node
                         .utf8_text(&source_code)

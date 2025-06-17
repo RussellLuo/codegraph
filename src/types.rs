@@ -14,6 +14,8 @@ pub enum NodeType {
     Directory,
     #[strum(serialize = "file")]
     File,
+    #[strum(serialize = "interface")]
+    Interface,
     #[strum(serialize = "class")]
     Class,
     #[strum(serialize = "function")]
@@ -193,7 +195,7 @@ impl Node {
                     serde_json::Value::String(self.skeleton_code.clone()),
                 );
             }
-            NodeType::Class | NodeType::Function => {
+            NodeType::Interface | NodeType::Class | NodeType::Function => {
                 dict.insert(
                     "language".to_string(),
                     serde_json::Value::String(self.language.to_string()),

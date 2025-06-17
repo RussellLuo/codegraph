@@ -48,7 +48,7 @@ impl CodeGraph {
             if force {
                 // Since the `COPY FROM` command does not support deleting existing nodes,
                 // we need to delete the existing nodes manually.
-                self.db.clean()?;
+                self.clean(true)?;
             }
 
             let (nodes, relationships) = self.parser.parse(path.clone())?;

@@ -7,6 +7,7 @@ pub enum NodeType {
     Unparsed,
     Directory,
     File,
+    Interface,
     Class,
     Function,
 }
@@ -17,6 +18,7 @@ impl From<codegraph::NodeType> for NodeType {
             codegraph::NodeType::Unparsed => NodeType::Unparsed,
             codegraph::NodeType::Directory => NodeType::Directory,
             codegraph::NodeType::File => NodeType::File,
+            codegraph::NodeType::Interface => NodeType::Interface,
             codegraph::NodeType::Class => NodeType::Class,
             codegraph::NodeType::Function => NodeType::Function,
         }
@@ -29,6 +31,7 @@ impl Into<codegraph::NodeType> for NodeType {
             NodeType::Unparsed => codegraph::NodeType::Unparsed,
             NodeType::Directory => codegraph::NodeType::Directory,
             NodeType::File => codegraph::NodeType::File,
+            NodeType::Interface => codegraph::NodeType::Interface,
             NodeType::Class => codegraph::NodeType::Class,
             NodeType::Function => codegraph::NodeType::Function,
         }

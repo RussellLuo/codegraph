@@ -9,7 +9,15 @@
 
 (type_declaration (
   (type_spec
+    name: (type_identifier) @definition.interface.name
+    type: (interface_type (_))
+  ) @definition.interface
+))
+
+(type_declaration (
+  (type_spec
     name: (type_identifier) @definition.class.name
+    type: (struct_type (_))
   ) @definition.class
 ))
 
