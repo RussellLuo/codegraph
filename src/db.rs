@@ -12,8 +12,8 @@ use tempfile;
 pub const CREATE_DATABASE_SCHEMA: &str = include_str!("schema.cypher");
 
 pub struct Database {
-    pub db_path: PathBuf,
     initialized: bool,
+    db_path: PathBuf,
     db: Option<kuzu::Database>,
 }
 
@@ -841,10 +841,21 @@ ON MATCH SET {}
         Ok(())
     }
 
-    pub fn clean(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn clean(&mut self, delete: bool) -> Result<(), Box<dyn std::error::Error>> {
+        if delete {
+            // Delete the entire database directory.
+            if self.db_path.exists() {
+                std::fs::remove_dir_all(&self.db_path)?;
+            }
+
+            // Need to reinitialize the database later.
+            self.initialized = false;
+            return Ok(());
+        }
+
+        // Remove all records in the database.
         if let Some(db) = &self.db {
             let conn = kuzu::Connection::new(db)?;
-            // Delete all records
             let _ = conn.query("MATCH (n) DETACH DELETE n")?;
         }
         Ok(())
@@ -940,7 +951,7 @@ mod tests {
             .collect();
         assert_eq!(relStrings, ["file1-[contains]->func1"],);
 
-        db.clean().unwrap();
+        db.clean(false).unwrap();
     }
 
     #[test]
@@ -964,7 +975,7 @@ mod tests {
         existing_nodes = db.query_nodes("MATCH (n) RETURN n").unwrap();
         assert_eq!(existing_nodes.len(), 0);
 
-        db.clean().unwrap();
+        db.clean(false).unwrap();
     }
 
     #[test]

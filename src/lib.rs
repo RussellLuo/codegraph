@@ -48,7 +48,7 @@ impl CodeGraph {
             if force {
                 // Since the `COPY FROM` command does not support deleting existing nodes,
                 // we need to delete the existing nodes manually.
-                self.clean(true)?;
+                self.db.clean(true)?;
             }
 
             let (nodes, relationships) = self.parser.parse(path.clone())?;
@@ -251,16 +251,7 @@ RETURN typ.name, typ.start_line, typ.end_line, typ.code, COLLECT(meth.skeleton_c
     /// - `clean(path: PathBuf)`
     /// - `clean(path: PathBuf, delete: bool)`
     pub fn clean(&mut self, delete: bool) -> Result<(), Box<dyn std::error::Error>> {
-        if !delete {
-            self.db.clean()?;
-            return Ok(());
-        }
-
-        // Delete the database directory.
-        if self.db.db_path.exists() {
-            std::fs::remove_dir_all(&self.db.db_path)?;
-        }
-        Ok(())
+        return self.db.clean(delete);
     }
 }
 
