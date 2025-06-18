@@ -225,43 +225,6 @@ impl Node {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Edge {
-    pub r#type: EdgeType,
-    pub from: String,
-    pub to: String,
-    pub import: Option<String>,
-    pub alias: Option<String>,
-}
-
-impl Into<Relationship> for Edge {
-    fn into(self) -> Relationship {
-        Relationship {
-            r#type: self.r#type,
-            from: Node {
-                name: self.from,
-                r#type: NodeType::Unparsed,
-                language: Language::Text,
-                start_line: 0,
-                end_line: 0,
-                code: String::new(),
-                skeleton_code: String::from(""),
-            },
-            to: Node {
-                name: self.to,
-                r#type: NodeType::Unparsed,
-                language: Language::Text,
-                start_line: 0,
-                end_line: 0,
-                code: String::new(),
-                skeleton_code: String::from(""),
-            },
-            import: self.import,
-            alias: self.alias,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct Relationship {
     /// 关系类型
     pub r#type: EdgeType,
     /// 起始节点
@@ -274,7 +237,7 @@ pub struct Relationship {
     pub alias: Option<String>,
 }
 
-impl Relationship {
+impl Edge {
     /// 从字典数据创建关系
     pub fn from_dict(
         data: &HashMap<String, serde_json::Value>,
@@ -327,7 +290,7 @@ impl Relationship {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        Ok(Relationship {
+        Ok(Edge {
             r#type: edge_type,
             from: from_node,
             to: to_node,

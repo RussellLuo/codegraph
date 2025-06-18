@@ -15,7 +15,7 @@ use walkdir::WalkDir;
 
 use crate::util;
 use crate::Database;
-use crate::{Edge, EdgeType, Language, Node, NodeType, Relationship};
+use crate::{Edge, EdgeType, Language, Node, NodeType};
 
 /// The tree-sitter definition query source for different languages.
 pub const PYTHON_DEFINITIONS_QUERY_SOURCE: &str = include_str!("python/definitions.scm");
@@ -106,7 +106,7 @@ pub struct Parser {
     repo_path: PathBuf,
     config: ParserConfig,
     pub nodes: IndexMap<String, Node>,
-    relationships: Vec<Relationship>,
+    edges: Vec<Edge>,
     pub func_param_types: HashMap<String, Vec<FuncParamType>>, // function name -> parameter types
     // language-specific properties
     go_module_path: Option<String>,
@@ -118,40 +118,40 @@ impl Parser {
             repo_path: repo_path,
             config: config,
             nodes: IndexMap::new(),
-            relationships: Vec::new(),
+            edges: Vec::new(),
             func_param_types: HashMap::new(),
             go_module_path: None,
         }
     }
 
-    /// Parses the directory and returns references to parsed nodes and relationships
+    /// Parses the directory and returns references to parsed nodes and edges
     ///
     /// # Arguments
     /// * `dir_path` - Path to the directory to parse
     ///
     /// # Returns
-    /// Tuple of references to parsed nodes and relationships vectors
+    /// Tuple of references to parsed nodes and edges vectors
     /// Will write JSON files to configured output directory if specified
     pub fn parse(
         &mut self,
         dir_path: PathBuf,
-    ) -> Result<(Vec<Node>, Vec<Relationship>), Box<dyn std::error::Error>> {
+    ) -> Result<(Vec<Node>, Vec<Edge>), Box<dyn std::error::Error>> {
         self.go_module_path = util::get_go_repo_module_path(&self.repo_path);
 
         self.traverse_directory(&dir_path)?;
         let nodes: Vec<Node> = self.nodes.values().cloned().collect();
 
-        // Return references to parsed nodes and relationships
-        Ok((nodes, self.relationships.clone()))
+        // Return references to parsed nodes and edges
+        Ok((nodes, self.edges.clone()))
     }
 
-    pub fn resolve_func_param_type_relationships(
+    pub fn resolve_func_param_type_edges(
         &self,
         nodes: &IndexMap<String, Node>,
         func_param_types: &HashMap<String, Vec<FuncParamType>>,
         db: &mut Database,
-    ) -> Result<Vec<Relationship>, Box<dyn std::error::Error>> {
-        let mut relationships: Vec<Relationship> = Vec::new();
+    ) -> Result<Vec<Edge>, Box<dyn std::error::Error>> {
+        let mut edges: Vec<Edge> = Vec::new();
 
         let mut pkg_types: IndexMap<String, HashSet<String>> = IndexMap::new();
         for (func_name, param_types) in func_param_types {
@@ -200,32 +200,32 @@ RETURN typ;
                         param_type.type_name.to_lowercase()
                     ));
                     if let (Some(func_node), Some(type_node)) = (func_node, type_node) {
-                        let rel = Relationship {
+                        let rel = Edge {
                             r#type: EdgeType::References,
                             from: func_node.clone(),
                             to: type_node.clone(),
                             import: None,
                             alias: None,
                         };
-                        relationships.push(rel);
+                        edges.push(rel);
                     }
                 }
             }
         }
 
-        Ok(relationships)
+        Ok(edges)
     }
 
-    /// Traverses all files and directories in the specified directory, creates Node and Relationship objects
+    /// Traverses all files and directories in the specified directory, creates Node and Edge objects
     /// This method processes files by calling self.parse_file directly when encountering supported file types
     ///
     /// # Arguments
     /// - `dir_path`: The directory path to traverse
     ///
     /// # Returns
-    /// - A tuple containing (nodes, relationships) where:
+    /// - A tuple containing (nodes, edges) where:
     ///   - nodes: Vector of Node objects representing directories, files, and parsed code elements
-    ///   - relationships: Vector of Relationship objects representing Contains relationships
+    ///   - edges: Vector of Edge objects representing Contains edges
     pub fn traverse_directory(
         &mut self,
         dir_path: &PathBuf,
@@ -370,7 +370,7 @@ RETURN typ;
                             self.nodes.insert(n_name, n);
                         }
                         for r in rels {
-                            self.relationships.push(r);
+                            self.edges.push(r);
                         }
                         if let Some(func_param_types) = func_param_types {
                             self.func_param_types.extend(func_param_types);
@@ -385,7 +385,7 @@ RETURN typ;
                     self.add_node(&current_node)?;
                     processed_paths.insert(entry_path.to_path_buf());
 
-                    // Find parent directory and create Contains relationship
+                    // Find parent directory and create Contains edge
                     if let Some(parent_path) = entry_path.parent() {
                         // Find parent node in the nodes vector
                         let parent_path_str = parent_path
@@ -413,14 +413,14 @@ RETURN typ;
 
                         // Find the actual parent node from nodes vector
                         if let Some(parent_node) = self.nodes.get(&parent_path_str) {
-                            let relationship = Relationship {
+                            let edge = Edge {
                                 r#type: EdgeType::Contains,
                                 from: parent_node.clone(),
                                 to: current_node.clone(),
                                 import: None,
                                 alias: None,
                             };
-                            self.relationships.push(relationship);
+                            self.edges.push(edge);
                         }
                     }
                 }
@@ -452,7 +452,7 @@ RETURN typ;
         (
             Node,
             IndexMap<String, Node>,
-            Vec<Relationship>,
+            Vec<Edge>,
             Option<HashMap<String, Vec<FuncParamType>>>,
         ),
         Box<dyn std::error::Error>,
@@ -499,7 +499,7 @@ RETURN typ;
         dir_path: &Path,
         file_path: &PathBuf,
         query_path: &str,
-    ) -> Result<(IndexMap<String, Node>, Vec<Relationship>), Box<dyn std::error::Error>> {
+    ) -> Result<(IndexMap<String, Node>, Vec<Edge>), Box<dyn std::error::Error>> {
         let query_source = if query_path.is_empty() {
             PYTHON_DEFINITIONS_QUERY_SOURCE.to_string()
         } else {
@@ -512,7 +512,7 @@ RETURN typ;
         }
 
         let mut nodes: IndexMap<String, Node> = IndexMap::new();
-        let mut relationships: Vec<Relationship> = Vec::new();
+        let mut edges: Vec<Edge> = Vec::new();
 
         let source_code = fs::read(&file_path).expect("Should have been able to read the file");
 
@@ -573,14 +573,14 @@ RETURN typ;
                         };
                         nodes.insert(node.name.clone(), node.clone());
 
-                        let relationship = Relationship {
+                        let edge = Edge {
                             r#type: EdgeType::Contains,
                             from: file_node.clone(),
                             to: node.clone(),
                             import: None,
                             alias: None,
                         };
-                        relationships.push(relationship);
+                        edges.push(edge);
                     }
                 }
                 "definition.class" => {
@@ -589,7 +589,7 @@ RETURN typ;
                 _ => {}
             }
         }
-        Ok((nodes, relationships))
+        Ok((nodes, edges))
     }
 
     fn parse_go_file(
@@ -601,7 +601,7 @@ RETURN typ;
     ) -> Result<
         (
             IndexMap<String, Node>,
-            Vec<Relationship>,
+            Vec<Edge>,
             Option<HashMap<String, Vec<FuncParamType>>>,
         ),
         Box<dyn std::error::Error>,
@@ -618,7 +618,7 @@ RETURN typ;
         }
 
         let mut nodes: IndexMap<String, Node> = IndexMap::new();
-        let mut relationships: Vec<Relationship> = Vec::new();
+        let mut edges: Vec<Edge> = Vec::new();
         let mut func_param_types: HashMap<String, Vec<FuncParamType>> = HashMap::new();
 
         let source_code = fs::read(&file_path).expect("Should have been able to read the file");
@@ -687,7 +687,7 @@ RETURN typ;
                                                 mod_import_path.rsplitn(2, '/').collect();
                                             let mod_name = parts.first().unwrap_or(&""); // get module name
 
-                                            let relationship = Relationship {
+                                            let edge = Edge {
                                                 r#type: EdgeType::Imports,
                                                 from: Node::from_type_and_name(
                                                     file_node.r#type.clone(),
@@ -700,7 +700,7 @@ RETURN typ;
                                                 import: Some(mod_name.to_string()),
                                                 alias: alias,
                                             };
-                                            relationships.push(relationship);
+                                            edges.push(edge);
                                         }
                                     }
                                 }
@@ -757,7 +757,7 @@ RETURN typ;
 
                         if let Some(curr_node) = current_node {
                             nodes.insert(curr_node.name.clone(), curr_node.clone());
-                            relationships.push(Relationship {
+                            edges.push(Edge {
                                 r#type: EdgeType::Contains,
                                 from: file_node.clone(),
                                 to: curr_node.clone(),
@@ -815,7 +815,7 @@ RETURN typ;
 
                         if let Some(curr_node) = current_node {
                             nodes.insert(curr_node.name.clone(), curr_node.clone());
-                            relationships.push(Relationship {
+                            edges.push(Edge {
                                 r#type: EdgeType::Contains,
                                 from: file_node.clone(),
                                 to: curr_node.clone(),
@@ -934,7 +934,7 @@ RETURN typ;
                                 let param_type = self.parse_go_func_param_type(
                                     &curr_node.name,
                                     &param_type_name,
-                                    &relationships,
+                                    &edges,
                                 );
                                 if let Some(param_type) = param_type {
                                     func_param_types
@@ -947,36 +947,35 @@ RETURN typ;
                             // There might be multiple parameter types for a method, in which case tree-sitter will
                             // emit multiple matches for the same function.
                             //
-                            // We only need to keep one node and one relationship for the same method.
+                            // We only need to keep one node and one edge for the same method.
                             if !nodes.contains_key(&curr_node.name) {
                                 nodes.insert(curr_node.name.clone(), curr_node.clone());
 
-                                let relationship =
-                                    if let Some(parent_struct_name) = &parent_struct_name {
-                                        let parent_node_name = curr_node
-                                            .name
-                                            .rsplit_once('.')
-                                            .map(|(prefix, _)| prefix)
-                                            .unwrap();
-                                        // Assume that the parent struct node is defined early in the current file.
-                                        let parent_node = nodes.get(parent_node_name).unwrap();
-                                        Relationship {
-                                            r#type: EdgeType::Contains,
-                                            from: parent_node.clone(),
-                                            to: curr_node.clone(),
-                                            import: None,
-                                            alias: None,
-                                        }
-                                    } else {
-                                        Relationship {
-                                            r#type: EdgeType::Contains,
-                                            from: file_node.clone(),
-                                            to: curr_node.clone(),
-                                            import: None,
-                                            alias: None,
-                                        }
-                                    };
-                                relationships.push(relationship);
+                                let edge = if let Some(parent_struct_name) = &parent_struct_name {
+                                    let parent_node_name = curr_node
+                                        .name
+                                        .rsplit_once('.')
+                                        .map(|(prefix, _)| prefix)
+                                        .unwrap();
+                                    // Assume that the parent struct node is defined early in the current file.
+                                    let parent_node = nodes.get(parent_node_name).unwrap();
+                                    Edge {
+                                        r#type: EdgeType::Contains,
+                                        from: parent_node.clone(),
+                                        to: curr_node.clone(),
+                                        import: None,
+                                        alias: None,
+                                    }
+                                } else {
+                                    Edge {
+                                        r#type: EdgeType::Contains,
+                                        from: file_node.clone(),
+                                        to: curr_node.clone(),
+                                        import: None,
+                                        alias: None,
+                                    }
+                                };
+                                edges.push(edge);
                             }
                         }
                     }
@@ -1090,7 +1089,7 @@ RETURN typ;
                                 let param_type = self.parse_go_func_param_type(
                                     &curr_node.name,
                                     &param_type_name,
-                                    &relationships,
+                                    &edges,
                                 );
                                 if let Some(param_type) = param_type {
                                     func_param_types
@@ -1103,36 +1102,35 @@ RETURN typ;
                             // There might be multiple parameter types for a method, in which case tree-sitter will
                             // emit multiple matches for the same function.
                             //
-                            // We only need to keep one node and one relationship for the same method.
+                            // We only need to keep one node and one edge for the same method.
                             if !nodes.contains_key(&curr_node.name) {
                                 nodes.insert(curr_node.name.clone(), curr_node.clone());
 
-                                let relationship =
-                                    if let Some(parent_struct_name) = &parent_struct_name {
-                                        let parent_node_name = curr_node
-                                            .name
-                                            .rsplit_once('.')
-                                            .map(|(prefix, _)| prefix)
-                                            .unwrap();
-                                        // Assume that the parent struct node is defined early in the current file.
-                                        let parent_node = nodes.get(parent_node_name).unwrap();
-                                        Relationship {
-                                            r#type: EdgeType::Contains,
-                                            from: parent_node.clone(),
-                                            to: curr_node.clone(),
-                                            import: None,
-                                            alias: None,
-                                        }
-                                    } else {
-                                        Relationship {
-                                            r#type: EdgeType::Contains,
-                                            from: file_node.clone(),
-                                            to: curr_node.clone(),
-                                            import: None,
-                                            alias: None,
-                                        }
-                                    };
-                                relationships.push(relationship);
+                                let edge = if let Some(parent_struct_name) = &parent_struct_name {
+                                    let parent_node_name = curr_node
+                                        .name
+                                        .rsplit_once('.')
+                                        .map(|(prefix, _)| prefix)
+                                        .unwrap();
+                                    // Assume that the parent struct node is defined early in the current file.
+                                    let parent_node = nodes.get(parent_node_name).unwrap();
+                                    Edge {
+                                        r#type: EdgeType::Contains,
+                                        from: parent_node.clone(),
+                                        to: curr_node.clone(),
+                                        import: None,
+                                        alias: None,
+                                    }
+                                } else {
+                                    Edge {
+                                        r#type: EdgeType::Contains,
+                                        from: file_node.clone(),
+                                        to: curr_node.clone(),
+                                        import: None,
+                                        alias: None,
+                                    }
+                                };
+                                edges.push(edge);
                             }
                         }
                     }
@@ -1140,14 +1138,14 @@ RETURN typ;
             }
         }
 
-        Ok((nodes, relationships, Some(func_param_types)))
+        Ok((nodes, edges, Some(func_param_types)))
     }
 
     fn parse_go_func_params(
         &self,
         from_node_name: &String,
         source_code: &[u8],
-        import_relationships: &Vec<Relationship>,
+        import_edges: &Vec<Edge>,
     ) -> Result<HashMap<String, Vec<FuncParamType>>, Box<dyn std::error::Error>> {
         let mut func_param_types: HashMap<String, Vec<FuncParamType>> = HashMap::new(); // function name -> parameter types
 
@@ -1218,7 +1216,7 @@ RETURN typ;
                 let mut real_package_name: Option<String> = None;
                 // Find the target package name that the type belongs to.
                 if let Some(package_name) = &package_name {
-                    for rel in import_relationships {
+                    for rel in import_edges {
                         if let Some(import) = &rel.import {
                             if import == package_name {
                                 real_package_name = Some(rel.to.name.clone());
@@ -1263,7 +1261,7 @@ RETURN typ;
         &self,
         from_node_name: &String,
         param_type_name: &String,
-        import_relationships: &Vec<Relationship>,
+        import_edges: &Vec<Edge>,
     ) -> Option<FuncParamType> {
         // Skip the inline type definitions
         // `f func (...) ...`
@@ -1299,7 +1297,7 @@ RETURN typ;
         let mut real_package_name: Option<String> = None;
         // Find the target package name that the type belongs to.
         if let Some(package_name) = &package_name {
-            for rel in import_relationships {
+            for rel in import_edges {
                 if let Some(import) = &rel.import {
                     if import == package_name {
                         real_package_name = Some(rel.to.name.clone());
@@ -1352,11 +1350,11 @@ mod tests {
         let mut parser = Parser::new(dir_path.clone(), config);
         let result = parser.parse(dir_path);
         match result {
-            Ok((nodes, relationships)) => {
+            Ok((nodes, edges)) => {
                 //for node in nodes {
                 //    println!("Node: {:?}", node);
                 //}
-                //for rel in relationships {
+                //for rel in edges {
                 //    println!("Relationship: {:?}", rel);
                 //}
             }
@@ -1384,9 +1382,9 @@ mod tests {
         let mut parser = Parser::new(dir_path.clone(), config);
         let result = parser.parse(dir_path);
         match result {
-            Ok((nodes, relationships)) => {
+            Ok((nodes, edges)) => {
                 let mut node_strings: Vec<_> = nodes.into_iter().map(|n| n.name).collect();
-                let mut rel_strings: Vec<_> = relationships
+                let mut rel_strings: Vec<_> = edges
                     .into_iter()
                     .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
                     .collect();

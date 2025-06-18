@@ -1,4 +1,4 @@
-use crate::{EdgeType, Language, Node, NodeType, Relationship};
+use crate::{Edge, EdgeType, Language, Node, NodeType};
 use indexmap::IndexMap;
 use kuzu;
 use log;
@@ -88,44 +88,44 @@ impl Database {
     }
 
     /// 将解析的关系按类型分组写入JSON文件
-    fn write_relationships_to_json(
+    fn write_edges_to_json(
         &self,
-        relationships: &[Relationship],
+        edges: &[Edge],
         out_dir: &Path,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // 确保输出目录存在
         std::fs::create_dir_all(out_dir)?;
 
         // 按关系类型分组，使用 to_dict() 转换为字典格式
-        let mut grouped_relationships: HashMap<String, Vec<IndexMap<String, serde_json::Value>>> =
+        let mut grouped_edges: HashMap<String, Vec<IndexMap<String, serde_json::Value>>> =
             HashMap::new();
 
-        for relationship in relationships {
+        for edge in edges {
             let key = format!(
                 "{}_{}_{}.json",
-                relationship.r#type.to_string(),
-                relationship.from.r#type.to_string(),
-                relationship.to.r#type.to_string()
+                edge.r#type.to_string(),
+                edge.from.r#type.to_string(),
+                edge.to.r#type.to_string()
             );
-            let relationship_dict = relationship.to_dict();
-            grouped_relationships
+            let edge_dict = edge.to_dict();
+            grouped_edges
                 .entry(key)
                 .or_insert_with(Vec::new)
-                .push(relationship_dict);
+                .push(edge_dict);
         }
 
         // 为每个关系类型创建单独的JSON文件
-        for (key, type_relationships) in grouped_relationships {
+        for (key, type_edges) in grouped_edges {
             let json_filename = &key;
             let json_path = PathBuf::from(out_dir).join(json_filename);
 
             // 将该类型的关系序列化为JSON（现在使用 to_dict() 的结果）
-            let json_content = serde_json::to_string_pretty(&type_relationships)?;
+            let json_content = serde_json::to_string_pretty(&type_edges)?;
             // 写入文件
             std::fs::write(&json_path, json_content)?;
             /*println!(
                 "已写入 {} 个 {} 类型的关系到文件: {}",
-                type_relationships.len(),
+                type_edges.len(),
                 key,
                 json_path.display()
             );*/
@@ -207,33 +207,33 @@ impl Database {
     }
 
     /// 将解析的关系按类型分组写入CSV文件
-    fn write_relationships_to_csv(
+    fn write_edges_to_csv(
         &self,
-        relationships: &[Relationship],
+        edges: &[Edge],
         out_dir: &Path,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // 确保输出目录存在
         std::fs::create_dir_all(out_dir)?;
 
         // 按关系类型分组
-        let mut grouped_relationships: HashMap<String, Vec<IndexMap<String, serde_json::Value>>> =
+        let mut grouped_edges: HashMap<String, Vec<IndexMap<String, serde_json::Value>>> =
             HashMap::new();
-        for relationship in relationships {
+        for edge in edges {
             let key = format!(
                 "{}_{}_{}",
-                relationship.r#type.to_string(),
-                relationship.from.r#type.to_string(),
-                relationship.to.r#type.to_string()
+                edge.r#type.to_string(),
+                edge.from.r#type.to_string(),
+                edge.to.r#type.to_string()
             );
-            let relationship_dict = relationship.to_dict();
-            grouped_relationships
+            let edge_dict = edge.to_dict();
+            grouped_edges
                 .entry(key)
                 .or_insert_with(Vec::new)
-                .push(relationship_dict);
+                .push(edge_dict);
         }
 
         // 为每个关系类型创建单独的CSV文件
-        for (key, type_relationships) in grouped_relationships {
+        for (key, type_edges) in grouped_edges {
             let csv_filename = format!("{}.csv", key);
             let csv_path = PathBuf::from(out_dir).join(csv_filename);
 
@@ -241,7 +241,7 @@ impl Database {
             let mut writer = csv::Writer::from_path(&csv_path)?;
 
             // 收集所有可能的字段名（使用第一个关系的字典键）
-            let field_names: Vec<String> = if let Some(first_rel) = type_relationships.first() {
+            let field_names: Vec<String> = if let Some(first_rel) = type_edges.first() {
                 first_rel.keys().map(|k| k.to_string()).collect()
             } else {
                 continue; // 跳过空关系组
@@ -251,7 +251,7 @@ impl Database {
             writer.write_record(&field_names)?;
 
             // 写入每个关系的数据
-            for rel_dict in type_relationships {
+            for rel_dict in type_edges {
                 let mut record = Vec::new();
                 for field in &field_names {
                     let value = rel_dict.get(field).unwrap_or(&serde_json::Value::Null);
@@ -387,21 +387,21 @@ impl Database {
         Ok(())
     }
 
-    pub fn bulk_insert_relationships(
+    pub fn bulk_insert_edges(
         &mut self,
-        relationships: &Vec<Relationship>,
+        edges: &Vec<Edge>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.init()?;
 
         let temp_dir = tempfile::tempdir()?;
         let temp_dir_path = temp_dir.path();
         log::debug!(
-            "save {} relationships in temp_dir: {:?}",
-            relationships.len(),
+            "save {} edges in temp_dir: {:?}",
+            edges.len(),
             temp_dir_path
         );
-        log::info!("bulk-insert {} relationships", relationships.len());
-        self.write_relationships_to_json(relationships, &temp_dir_path)?;
+        log::info!("bulk-insert {} edges", edges.len());
+        self.write_edges_to_json(edges, &temp_dir_path)?;
 
         if let Some(db) = &self.db {
             let conn = kuzu::Connection::new(db)?;
@@ -421,7 +421,7 @@ impl Database {
                         let parts: Vec<&str> = file_stem.split('_').collect();
                         if parts.len() != 3 {
                             return Err(format!(
-                                "Invalid filename format for relationships file: {}",
+                                "Invalid filename format for edges file: {}",
                                 file_stem
                             )
                             .into());
@@ -453,21 +453,21 @@ impl Database {
     }
 
     /// 批量通过CSV文件导入关系数据
-    pub fn bulk_insert_relationships_via_csv(
+    pub fn bulk_insert_edges_via_csv(
         &mut self,
-        relationships: &Vec<Relationship>,
+        edges: &Vec<Edge>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.init()?;
 
         let temp_dir = tempfile::tempdir()?;
         let temp_dir_path = temp_dir.path();
         log::debug!(
-            "save {} relationships in temp_dir: {:?}",
-            relationships.len(),
+            "save {} edges in temp_dir: {:?}",
+            edges.len(),
             temp_dir_path
         );
-        log::info!("bulk-insert {} relationships", relationships.len());
-        self.write_relationships_to_csv(relationships, &temp_dir_path)?;
+        log::info!("bulk-insert {} edges", edges.len());
+        self.write_edges_to_csv(edges, &temp_dir_path)?;
 
         if let Some(db) = &self.db {
             let conn = kuzu::Connection::new(db)?;
@@ -487,7 +487,7 @@ impl Database {
                         let parts: Vec<&str> = file_stem.split('_').collect();
                         if parts.len() != 3 {
                             return Err(format!(
-                                "Invalid filename format for relationships file: {}",
+                                "Invalid filename format for edges file: {}",
                                 file_stem
                             )
                             .into());
@@ -598,13 +598,10 @@ ON MATCH SET {}
         Ok(())
     }
 
-    pub fn upsert_relationships(
-        &mut self,
-        rels: &Vec<Relationship>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn upsert_edges(&mut self, rels: &Vec<Edge>) -> Result<(), Box<dyn std::error::Error>> {
         self.init()?;
 
-        log::info!("upsert {} relationships", rels.len());
+        log::info!("upsert {} edges", rels.len());
 
         // 每次需要连接时创建新的连接，避免生命周期问题
         if let Some(db) = &self.db {
@@ -639,7 +636,7 @@ ON MATCH SET {}
                     set_data,
                     set_data,
                 );
-                log::debug!("upsert_relationships query: {}", query);
+                log::debug!("upsert_edges query: {}", query);
                 conn.query(&query)?;
             }
         }
@@ -731,13 +728,10 @@ ON MATCH SET {}
         Ok(nodes)
     }
 
-    pub fn query_relationships(
-        &mut self,
-        stmt: &str,
-    ) -> Result<Vec<Relationship>, Box<dyn std::error::Error>> {
+    pub fn query_edges(&mut self, stmt: &str) -> Result<Vec<Edge>, Box<dyn std::error::Error>> {
         self.init()?;
 
-        let mut relationships: Vec<Relationship> = vec![];
+        let mut edges: Vec<Edge> = vec![];
 
         if let Some(db) = &self.db {
             let conn = kuzu::Connection::new(db)?;
@@ -792,7 +786,7 @@ ON MATCH SET {}
 
                         let parts: Vec<&str> = typ.split('_').collect();
                         if parts.len() != 2 {
-                            return Err(format!("Invalid relationship type: {}", typ).into());
+                            return Err(format!("Invalid edge type: {}", typ).into());
                         }
 
                         let from_node_type: NodeType = parts[0].parse().unwrap();
@@ -805,7 +799,7 @@ ON MATCH SET {}
                             .parse()
                             .unwrap_or(EdgeType::Contains);
 
-                        let relationship = Relationship {
+                        let edge = Edge {
                             r#type: rel_type,
                             from: Node::from_type_and_name(from_node_type, from_node_name),
                             to: Node::from_type_and_name(to_node_type, to_node_name),
@@ -813,13 +807,13 @@ ON MATCH SET {}
                             alias: alias,
                         };
 
-                        relationships.push(relationship);
+                        edges.push(edge);
                     }
                     _ => println!("无法识别的关系类型"),
                 }
             }
         }
-        Ok(relationships)
+        Ok(edges)
     }
 
     pub fn delete_nodes(&mut self, names: &Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
@@ -832,7 +826,7 @@ ON MATCH SET {}
         if let Some(db) = &self.db {
             let conn = kuzu::Connection::new(db)?;
 
-            // Delete nodes and all of their relationships
+            // Delete nodes and all of their edges
             // see https://docs.kuzudb.com/cypher/data-manipulation-clauses/delete/#detach-delete.
             let query = format!("MATCH (n) WHERE n.name IN {:?} DETACH DELETE n", &names,);
             conn.query(&query)?;
@@ -926,12 +920,12 @@ mod tests {
     fn test_query() {}
 
     #[test]
-    fn test_query_relationships() {
+    fn test_query_edges() {
         let nodes = vec![
             Node::from_type_and_name(NodeType::File, "file1".to_string()),
             Node::from_type_and_name(NodeType::Function, "func1".to_string()),
         ];
-        let rels = vec![Relationship {
+        let rels = vec![Edge {
             r#type: EdgeType::Contains,
             from: Node::from_type_and_name(NodeType::File, "file1".to_string()),
             to: Node::from_type_and_name(NodeType::Function, "func1".to_string()),
@@ -940,10 +934,10 @@ mod tests {
         }];
         let mut db = Database::new(PathBuf::from("db"));
         db.upsert_nodes(&nodes).unwrap();
-        db.upsert_relationships(&rels).unwrap();
+        db.upsert_edges(&rels).unwrap();
 
         let existing_rels = db
-            .query_relationships("MATCH (a)-[e]->(b) RETURN a.name, b.name, e")
+            .query_edges("MATCH (a)-[e]->(b) RETURN a.name, b.name, e")
             .unwrap();
         let mut relStrings: Vec<_> = existing_rels
             .into_iter()

@@ -32,7 +32,7 @@ export interface Node {
   /** The skeleton code text */
   skeletonCode: string
 }
-export interface Relationship {
+export interface Edge {
   /** 关系类型 */
   type: EdgeType
   /** 起始节点 */
@@ -76,7 +76,7 @@ export interface Config {
 }
 export interface ParseResult {
   nodes: Array<Node>
-  relationships: Array<Relationship>
+  relationships: Array<Edge>
 }
 export const enum LogLevel {
   Error = 'Error',

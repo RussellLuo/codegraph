@@ -9,7 +9,7 @@ mod util;
 
 pub use db::Database;
 pub use parser::{Parser, ParserConfig};
-pub use types::{Edge, EdgeType, Language, Node, NodeType, Relationship};
+pub use types::{Edge, EdgeType, Language, Node, NodeType};
 
 pub type Config = ParserConfig;
 
@@ -51,17 +51,17 @@ impl CodeGraph {
                 self.db.clean(true)?;
             }
 
-            let (nodes, relationships) = self.parser.parse(path.clone())?;
+            let (nodes, edges) = self.parser.parse(path.clone())?;
             self.db.bulk_insert_nodes_via_csv(&nodes)?;
-            self.db.bulk_insert_relationships_via_csv(&relationships)?;
+            self.db.bulk_insert_edges_via_csv(&edges)?;
 
             // TODO: needs improvement.
-            let type_rels = self.parser.resolve_func_param_type_relationships(
+            let type_edges = self.parser.resolve_func_param_type_edges(
                 &self.parser.nodes,
                 &self.parser.func_param_types,
                 &mut self.db,
             )?;
-            self.db.bulk_insert_relationships_via_csv(&type_rels)?;
+            self.db.bulk_insert_edges_via_csv(&type_edges)?;
 
             return Ok(());
         }
@@ -86,7 +86,7 @@ RETURN def;
             );
             let old_nodes = self.db.query_nodes(stmt.as_str())?;
 
-            let (file_node, nodes, rels, func_param_types) = self.parser.parse_file(&path)?;
+            let (file_node, nodes, edges, func_param_types) = self.parser.parse_file(&path)?;
 
             // Delete outdated nodes.
             // Find nodes that exist in old_nodes but not in nodes (outdated nodes to be deleted)
@@ -98,7 +98,7 @@ RETURN def;
                 .collect();
             self.db.delete_nodes(&node_names_to_delete)?;
 
-            // Delete all out-going relationships from the current file node and old nodes.
+            // Delete all out-going edges from the current file node and old nodes.
             let mut node_names_for_rel_deletion = vec![rel_file_path.clone()];
             node_names_for_rel_deletion
                 .extend(old_nodes.clone().into_iter().map(|node| node.name.clone()));
@@ -120,31 +120,31 @@ DELETE e;
 "#,
                 &node_names_array,
             );
-            log::debug!("delete out-going relationships: {}", stmt);
+            log::debug!("delete out-going edges: {}", stmt);
             let _ = self.db.query(stmt.as_str())?;
 
             // Upsert the file node first.
             self.db.upsert_nodes(&vec![file_node])?;
 
-            // Upsert the rest of the nodes and relationships.
+            // Upsert the rest of the nodes and edges.
             let vec_nodes: Vec<Node> = nodes.values().cloned().collect();
             self.db.upsert_nodes(&vec_nodes)?;
-            self.db.upsert_relationships(&rels)?;
+            self.db.upsert_edges(&edges)?;
 
             // TODO: needs improvement.
-            let type_rels = self.parser.resolve_func_param_type_relationships(
+            let type_edges = self.parser.resolve_func_param_type_edges(
                 &nodes,
                 &func_param_types.unwrap(),
                 &mut self.db,
             )?;
 
             if log::log_enabled!(log::Level::Debug) {
-                for r in &type_rels {
+                for r in &type_edges {
                     log::debug!("type_rel: {}-[{}]{}", r.from.name, r.r#type, r.to.name);
                 }
             }
 
-            self.db.upsert_relationships(&type_rels)?;
+            self.db.upsert_edges(&type_edges)?;
         } else if path.is_dir() {
             return Err("Not supported yet".into());
         } else {
@@ -162,11 +162,8 @@ DELETE e;
         return self.db.query_nodes(stmt.as_str());
     }
 
-    pub fn query_relationships(
-        &mut self,
-        stmt: String,
-    ) -> Result<Vec<Relationship>, Box<dyn std::error::Error>> {
-        return self.db.query_relationships(stmt.as_str());
+    pub fn query_edges(&mut self, stmt: String) -> Result<Vec<Edge>, Box<dyn std::error::Error>> {
+        return self.db.query_edges(stmt.as_str());
     }
 
     pub fn get_func_param_types(
@@ -318,17 +315,17 @@ mod tests {
 
         // 1.2 assert data
         let final_nodes = graph.query_nodes("MATCH (n) RETURN n".to_string()).unwrap();
-        let final_rels = graph
-            .query_relationships("MATCH (a)-[e]->(b) RETURN a.name, b.name, e".to_string())
+        let final_edges = graph
+            .query_edges("MATCH (a)-[e]->(b) RETURN a.name, b.name, e".to_string())
             .unwrap();
         let mut node_strings: Vec<_> = final_nodes.into_iter().map(|n| n.name).collect();
-        let mut rel_strings: Vec<_> = final_rels
+        let mut edge_strings: Vec<_> = final_edges
             .into_iter()
             .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
             .collect();
 
         node_strings.sort();
-        rel_strings.sort();
+        edge_strings.sort();
 
         assert_eq!(
             node_strings,
@@ -347,7 +344,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            rel_strings,
+            edge_strings,
             [
                 ".-[contains]->main.go",
                 ".-[contains]->types.go",
@@ -386,17 +383,17 @@ mod tests {
 
         // 2.2 assert data
         let final_nodes = graph.query_nodes("MATCH (n) RETURN n".to_string()).unwrap();
-        let final_rels = graph
-            .query_relationships("MATCH (a)-[e]->(b) RETURN a.name, b.name, e".to_string())
+        let final_edges = graph
+            .query_edges("MATCH (a)-[e]->(b) RETURN a.name, b.name, e".to_string())
             .unwrap();
         let mut node_strings: Vec<_> = final_nodes.into_iter().map(|n| n.name).collect();
-        let mut rel_strings: Vec<_> = final_rels
+        let mut edge_strings: Vec<_> = final_edges
             .into_iter()
             .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
             .collect();
 
         node_strings.sort();
-        rel_strings.sort();
+        edge_strings.sort();
 
         assert_eq!(
             node_strings,
@@ -415,7 +412,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            rel_strings,
+            edge_strings,
             [
                 ".-[contains]->main.go",
                 ".-[contains]->types.go",

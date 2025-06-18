@@ -121,7 +121,7 @@ impl Into<codegraph::Node> for Node {
 
 #[napi(object)]
 #[derive(Clone)]
-pub struct Relationship {
+pub struct Edge {
     /// 关系类型
     pub r#type: EdgeType,
     /// 起始节点
@@ -134,8 +134,8 @@ pub struct Relationship {
     pub alias: Option<String>,
 }
 
-impl From<codegraph::Relationship> for Relationship {
-    fn from(rel: codegraph::Relationship) -> Self {
+impl From<codegraph::Edge> for Edge {
+    fn from(rel: codegraph::Edge) -> Self {
         Self {
             r#type: EdgeType::from(rel.r#type),
             from: Node::from(rel.from),
@@ -146,9 +146,9 @@ impl From<codegraph::Relationship> for Relationship {
     }
 }
 
-impl Into<codegraph::Relationship> for Relationship {
-    fn into(self) -> codegraph::Relationship {
-        codegraph::Relationship {
+impl Into<codegraph::Edge> for Edge {
+    fn into(self) -> codegraph::Edge {
+        codegraph::Edge {
             r#type: self.r#type.into(),
             from: self.from.into(),
             to: self.to.into(),
@@ -230,7 +230,7 @@ impl Into<codegraph::Config> for Config {
 #[napi(object)]
 pub struct ParseResult {
     pub nodes: Vec<Node>,
-    pub relationships: Vec<Relationship>,
+    pub relationships: Vec<Edge>,
 }
 
 #[napi]
