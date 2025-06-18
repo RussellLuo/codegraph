@@ -8,7 +8,7 @@ mod types;
 mod util;
 
 pub use db::Database;
-pub use parser::{Parser, ParserConfig};
+pub use parser::{FuncParamType, Parser, ParserConfig, QueryPattern};
 pub use types::{Edge, EdgeType, Language, Node, NodeType};
 
 pub type Config = ParserConfig;
