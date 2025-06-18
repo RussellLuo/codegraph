@@ -37,9 +37,9 @@ pub enum EdgeType {
 #[derive(Debug, Clone, strum_macros::Display, strum_macros::EnumString, serde::Serialize)]
 pub enum Language {
     Text,
-    Python,
     Go,
-    // TypeScript,
+    TypeScript,
+    Python,
     // JavaScript,
 }
 
@@ -48,9 +48,9 @@ impl Language {
         let ext = Path::new(path).extension().and_then(|e| e.to_str());
 
         match ext {
-            Some("py") => Language::Python,
             Some("go") => Language::Go,
-            // Some("ts") => Language::TypeScript,
+            Some("ts") => Language::TypeScript,
+            Some("py") => Language::Python,
             // Some("js") => Language::JavaScript,
             _ => Language::Text,
         }

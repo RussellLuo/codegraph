@@ -17,18 +17,10 @@ use crate::util;
 use crate::Database;
 use crate::{Edge, EdgeType, Language, Node, NodeType};
 
+mod common;
 mod go;
 mod python;
-
-/// Tree-sitter query patterns.
-#[derive(Debug, Clone, PartialEq, Eq, strum_macros::FromRepr)]
-pub enum QueryPattern {
-    Import,
-    Interface,
-    Class,
-    Function,
-    Method,
-}
+mod typescript;
 
 #[derive(Clone, Debug)]
 /// Configuration options for the parser.
@@ -107,8 +99,9 @@ pub struct Parser {
     edges: Vec<Edge>,
     pub func_param_types: HashMap<String, Vec<FuncParamType>>, // function name -> parameter types
 
-    // language-specific parsers
+    // Language-specific parsers
     go_parser: go::Parser,
+    typescript_parser: typescript::Parser,
     python_parser: python::Parser,
 }
 
@@ -122,6 +115,7 @@ impl Parser {
             func_param_types: HashMap::new(),
 
             go_parser: go::Parser::new(repo_path.clone()),
+            typescript_parser: typescript::Parser::new(repo_path.clone()),
             python_parser: python::Parser::new(repo_path.clone()),
         }
     }
@@ -473,16 +467,22 @@ RETURN typ;
         };
         // Parse the file and add parsed nodes to the collection
         match file_node.language {
+            Language::Go => {
+                let (nodes, rels, func_param_types) =
+                    self.go_parser.parse(&file_node, &file_path.to_path_buf())?;
+                return Ok((file_node, nodes, rels, func_param_types));
+            }
+            Language::TypeScript => {
+                let (nodes, rels, func_param_types) = self
+                    .typescript_parser
+                    .parse(&file_node, &file_path.to_path_buf())?;
+                return Ok((file_node, nodes, rels, func_param_types));
+            }
             Language::Python => {
                 let (nodes, rels) = self
                     .python_parser
                     .parse(&file_node, &file_path.to_path_buf())?;
                 return Ok((file_node, nodes, rels, None));
-            }
-            Language::Go => {
-                let (nodes, rels, func_param_types) =
-                    self.go_parser.parse(&file_node, &file_path.to_path_buf())?;
-                return Ok((file_node, nodes, rels, func_param_types));
             }
             Language::Text => {
                 return Ok((file_node, IndexMap::new(), vec![], None));
@@ -541,13 +541,13 @@ mod tests {
         match result {
             Ok((nodes, edges)) => {
                 let mut node_strings: Vec<_> = nodes.into_iter().map(|n| n.name).collect();
-                let mut rel_strings: Vec<_> = edges
+                let mut edge_strings: Vec<_> = edges
                     .into_iter()
                     .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
                     .collect();
 
                 node_strings.sort();
-                rel_strings.sort();
+                edge_strings.sort();
 
                 assert_eq!(
                     node_strings,
@@ -566,7 +566,7 @@ mod tests {
                     ]
                 );
                 assert_eq!(
-                    rel_strings,
+                    edge_strings,
                     [
                         "main.go-[contains]->main.go:User",
                         "main.go-[contains]->main.go:main",
@@ -576,6 +576,56 @@ mod tests {
                         "main.go:User-[contains]->main.go:User.UpdateEmail",
                         "types.go-[contains]->types.go:Address",
                         "types.go-[contains]->types.go:Hobby"
+                    ],
+                );
+            }
+            Err(e) => {
+                println!("Failed to parse: {:?}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_typescript() {
+        // Create test file
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let dir_path = PathBuf::from(manifest_dir)
+            .join("examples")
+            .join("typescript");
+
+        let config =
+            ParserConfig::default().ignore_patterns(vec!["*".to_string(), "!*.ts".to_string()]);
+
+        let mut parser = Parser::new(dir_path.clone(), config);
+        let result = parser.parse(dir_path);
+        match result {
+            Ok((nodes, edges)) => {
+                let mut node_strings: Vec<_> = nodes.into_iter().map(|n| n.name).collect();
+                let mut edge_strings: Vec<_> = edges
+                    .into_iter()
+                    .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
+                    .collect();
+
+                node_strings.sort();
+                edge_strings.sort();
+
+                assert_eq!(
+                    node_strings,
+                    [
+                        "",
+                        "main.ts",
+                        "types.ts",
+                        "types.ts:User",
+                        "types.ts:UserService"
+                    ],
+                );
+                assert_eq!(
+                    edge_strings,
+                    [
+                        "-[contains]->main.ts",
+                        "-[contains]->types.ts",
+                        "types.ts-[contains]->types.ts:User",
+                        "types.ts-[contains]->types.ts:UserService"
                     ],
                 );
             }

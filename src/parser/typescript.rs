@@ -5,7 +5,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use tree_sitter;
 use tree_sitter::StreamingIterator;
-use tree_sitter_go;
+use tree_sitter_typescript;
 
 use super::common;
 use super::common::QueryPattern;
@@ -13,19 +13,18 @@ use crate::util;
 use crate::FuncParamType;
 use crate::{Edge, EdgeType, Language, Node, NodeType};
 
-/// The tree-sitter definition query source for Go.
-pub const GO_DEFINITIONS_QUERY_SOURCE: &str = include_str!("queries/go-definitions.scm");
+/// The tree-sitter definition query source for TypeScript.
+pub const TYPESCRIPT_DEFINITIONS_QUERY_SOURCE: &str =
+    include_str!("queries/typescript-definitions.scm");
 
 pub struct Parser {
     repo_path: PathBuf,
-    go_module_path: Option<String>,
 }
 
 impl Parser {
     pub fn new(repo_path: PathBuf) -> Self {
         Self {
             repo_path: repo_path.clone(),
-            go_module_path: util::get_go_repo_module_path(&repo_path),
         }
     }
 
@@ -41,7 +40,7 @@ impl Parser {
         ),
         Box<dyn std::error::Error>,
     > {
-        let query_source = GO_DEFINITIONS_QUERY_SOURCE.to_string();
+        let query_source = TYPESCRIPT_DEFINITIONS_QUERY_SOURCE.to_string();
         let mut nodes: IndexMap<String, Node> = IndexMap::new();
         let mut edges: Vec<Edge> = Vec::new();
         let mut func_param_types: HashMap<String, Vec<FuncParamType>> = HashMap::new();
@@ -49,7 +48,7 @@ impl Parser {
         let source_code = fs::read(&file_path).expect("Should have been able to read the file");
 
         let mut parser = tree_sitter::Parser::new();
-        let language = &tree_sitter_go::LANGUAGE.into();
+        let language = &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
         parser
             .set_language(language)
             .expect("Error loading language parser");
@@ -65,23 +64,30 @@ impl Parser {
             if let Some(pattern) = QueryPattern::from_repr(mat.pattern_index) {
                 match pattern {
                     QueryPattern::Import => {
+                        /*
                         for capture in mat.captures {
-                            let start = capture.node.start_position();
-                            let end = capture.node.end_position();
                             let capture_name = query.capture_names()[capture.index as usize];
                             let capture_node_text: String = capture
                                 .node
                                 .utf8_text(&source_code)
                                 .unwrap_or("")
                                 .to_string();
-                            log::trace!(
-                                "[CAPTURE]\nname: {capture_name}, start: {start}, end: {end}, text: {:?}, capture: {:?}",
-                                capture_node_text,
-                                capture.node.to_sexp()
-                            );
+                            common::log_capture(&capture, capture_name, &capture_node_text);
 
                             match capture_name {
+                                "reference.namespace_import.name" => {
+                                    // import * as X from 'Y' => X
+                                }
+                                "reference.named_import.name" => {
+                                    // import { X } from 'Y' => X
+                                }
+                                "reference.default_import.name" => {
+                                    // import X from 'Y' => X
+                                }
                                 "reference.import.path" => {
+                                    // import X from 'Y' => Y
+                                    // import { X } from 'Y' => Y
+                                    // import * as X from 'Y' => Y
                                     let path_name: String = capture
                                         .node
                                         .utf8_text(&source_code)
@@ -132,8 +138,8 @@ impl Parser {
                                 _ => {}
                             }
                         }
+                        */
                     }
-
                     QueryPattern::Interface => {
                         let current_node = common::parse_simple_interface(
                             &query,
@@ -175,8 +181,8 @@ impl Parser {
                             });
                         }
                     }
-
                     QueryPattern::Function => {
+                        /*
                         let mut current_node: Option<Node> = None;
                         let mut current_tree_sitter_main_node: Option<tree_sitter::Node> = None;
                         let mut parent_struct_name: Option<String> = None;
@@ -329,161 +335,164 @@ impl Parser {
                                 edges.push(edge);
                             }
                         }
+                        */
                     }
 
                     QueryPattern::Method => {
-                        let mut current_node: Option<Node> = None;
-                        let mut current_tree_sitter_main_node: Option<tree_sitter::Node> = None;
-                        let mut parent_struct_name: Option<String> = None;
-                        let mut param_type_names: Vec<String> = Vec::new();
+                        /*
+                            let mut current_node: Option<Node> = None;
+                            let mut current_tree_sitter_main_node: Option<tree_sitter::Node> = None;
+                            let mut parent_struct_name: Option<String> = None;
+                            let mut param_type_names: Vec<String> = Vec::new();
 
-                        for capture in mat.captures {
-                            let start = capture.node.start_position();
-                            let end = capture.node.end_position();
-                            let capture_name = query.capture_names()[capture.index as usize];
-                            let capture_node_text: String = capture
-                                .node
-                                .utf8_text(&source_code)
-                                .unwrap_or("")
-                                .to_string();
-                            log::trace!(
-                                "[CAPTURE]\nname: {capture_name}, start: {start}, end: {end}, text: {:?}, capture: {:?}",
-                                capture_node_text,
-                                capture.node.to_sexp()
-                            );
+                            for capture in mat.captures {
+                                let start = capture.node.start_position();
+                                let end = capture.node.end_position();
+                                let capture_name = query.capture_names()[capture.index as usize];
+                                let capture_node_text: String = capture
+                                    .node
+                                    .utf8_text(&source_code)
+                                    .unwrap_or("")
+                                    .to_string();
+                                log::trace!(
+                                    "[CAPTURE]\nname: {capture_name}, start: {start}, end: {end}, text: {:?}, capture: {:?}",
+                                    capture_node_text,
+                                    capture.node.to_sexp()
+                                );
 
-                            match capture_name {
-                                "definition.method" => {
-                                    current_node = Some(Node {
-                                        name: "".to_string(), // fill in later
-                                        r#type: NodeType::Function,
-                                        language: file_node.language.clone(),
-                                        start_line: capture.node.start_position().row,
-                                        end_line: capture.node.end_position().row,
-                                        code: capture_node_text,
-                                        skeleton_code: String::new(),
-                                    });
-                                    current_tree_sitter_main_node = Some(capture.node);
-                                }
-                                "definition.method.name" => {
-                                    if let Some(curr_node) = &mut current_node {
-                                        curr_node.name = format!(
+                                match capture_name {
+                                    "definition.method" => {
+                                        current_node = Some(Node {
+                                            name: "".to_string(), // fill in later
+                                            r#type: NodeType::Function,
+                                            language: file_node.language.clone(),
+                                            start_line: capture.node.start_position().row,
+                                            end_line: capture.node.end_position().row,
+                                            code: capture_node_text,
+                                            skeleton_code: String::new(),
+                                        });
+                                        current_tree_sitter_main_node = Some(capture.node);
+                                    }
+                                    "definition.method.name" => {
+                                        if let Some(curr_node) = &mut current_node {
+                                            curr_node.name = format!(
+                                                "{}:{}",
+                                                Path::new(file_path)
+                                                    .strip_prefix(&self.repo_path)
+                                                    .unwrap_or_else(|_| Path::new(file_path))
+                                                    .to_string_lossy(),
+                                                capture_node_text
+                                            );
+                                        }
+                                    }
+                                    "definition.method.receiver_type" => {
+                                        // Try to find the parent struct of the current method.
+                                        let struct_node_name = format!(
                                             "{}:{}",
                                             Path::new(file_path)
                                                 .strip_prefix(&self.repo_path)
                                                 .unwrap_or_else(|_| Path::new(file_path))
                                                 .to_string_lossy(),
-                                            capture_node_text
+                                            capture_node_text,
                                         );
+                                        // Assume that the struct node is defined early in the current file.
+                                        if nodes.contains_key(&struct_node_name) {
+                                            parent_struct_name = Some(capture_node_text);
+                                        }
                                     }
+                                    "definition.method.param_type" => {
+                                        let param_type_name: String = capture
+                                            .node
+                                            .utf8_text(&source_code)
+                                            .unwrap_or("")
+                                            .to_string();
+                                        param_type_names.push(param_type_name);
+                                    }
+                                    "definition.method.body" => {
+                                        if let Some(current_tree_sitter_main_node) =
+                                            current_tree_sitter_main_node
+                                        {
+                                            let start_byte = current_tree_sitter_main_node.start_byte();
+                                            let body_start_byte = capture.node.start_byte();
+                                            if let Some(curr_node) = &mut current_node {
+                                                // Skip the body and keep only the signature.
+                                                curr_node.skeleton_code = String::from_utf8_lossy(
+                                                    &source_code[start_byte..body_start_byte],
+                                                )
+                                                .to_string()
+                                                    + "{\n...\n}";
+                                            }
+                                        }
+                                    }
+                                    _ => {}
                                 }
-                                "definition.method.receiver_type" => {
-                                    // Try to find the parent struct of the current method.
-                                    let struct_node_name = format!(
-                                        "{}:{}",
+                            }
+
+                            if let Some(curr_node) = &mut current_node {
+                                // Change the name of the current node to include the parent struct name, if any.
+                                if let Some(parent_struct_name) = &parent_struct_name {
+                                    let node_name = curr_node.name.rsplit(':').next().unwrap_or("");
+                                    curr_node.name = format!(
+                                        "{}:{}.{}",
                                         Path::new(file_path)
                                             .strip_prefix(&self.repo_path)
                                             .unwrap_or_else(|_| Path::new(file_path))
                                             .to_string_lossy(),
-                                        capture_node_text,
+                                        parent_struct_name.clone(),
+                                        node_name
                                     );
-                                    // Assume that the struct node is defined early in the current file.
-                                    if nodes.contains_key(&struct_node_name) {
-                                        parent_struct_name = Some(capture_node_text);
+                                }
+
+                                // Parse the parameter types of the current function.
+                                for param_type_name in param_type_names {
+                                    let param_type = Self::parse_func_param_type(
+                                        &curr_node.name,
+                                        &param_type_name,
+                                        &edges,
+                                    );
+                                    if let Some(param_type) = param_type {
+                                        func_param_types
+                                            .entry(curr_node.name.clone())
+                                            .or_insert_with(Vec::new)
+                                            .push(param_type);
                                     }
                                 }
-                                "definition.method.param_type" => {
-                                    let param_type_name: String = capture
-                                        .node
-                                        .utf8_text(&source_code)
-                                        .unwrap_or("")
-                                        .to_string();
-                                    param_type_names.push(param_type_name);
-                                }
-                                "definition.method.body" => {
-                                    if let Some(current_tree_sitter_main_node) =
-                                        current_tree_sitter_main_node
-                                    {
-                                        let start_byte = current_tree_sitter_main_node.start_byte();
-                                        let body_start_byte = capture.node.start_byte();
-                                        if let Some(curr_node) = &mut current_node {
-                                            // Skip the body and keep only the signature.
-                                            curr_node.skeleton_code = String::from_utf8_lossy(
-                                                &source_code[start_byte..body_start_byte],
-                                            )
-                                            .to_string()
-                                                + "{\n...\n}";
+
+                                // There might be multiple parameter types for a method, in which case tree-sitter will
+                                // emit multiple matches for the same function.
+                                //
+                                // We only need to keep one node and one edge for the same method.
+                                if !nodes.contains_key(&curr_node.name) {
+                                    nodes.insert(curr_node.name.clone(), curr_node.clone());
+
+                                    let edge = if let Some(parent_struct_name) = &parent_struct_name {
+                                        let parent_node_name = curr_node
+                                            .name
+                                            .rsplit_once('.')
+                                            .map(|(prefix, _)| prefix)
+                                            .unwrap();
+                                        // Assume that the parent struct node is defined early in the current file.
+                                        let parent_node = nodes.get(parent_node_name).unwrap();
+                                        Edge {
+                                            r#type: EdgeType::Contains,
+                                            from: parent_node.clone(),
+                                            to: curr_node.clone(),
+                                            import: None,
+                                            alias: None,
                                         }
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        if let Some(curr_node) = &mut current_node {
-                            // Change the name of the current node to include the parent struct name, if any.
-                            if let Some(parent_struct_name) = &parent_struct_name {
-                                let node_name = curr_node.name.rsplit(':').next().unwrap_or("");
-                                curr_node.name = format!(
-                                    "{}:{}.{}",
-                                    Path::new(file_path)
-                                        .strip_prefix(&self.repo_path)
-                                        .unwrap_or_else(|_| Path::new(file_path))
-                                        .to_string_lossy(),
-                                    parent_struct_name.clone(),
-                                    node_name
-                                );
-                            }
-
-                            // Parse the parameter types of the current function.
-                            for param_type_name in param_type_names {
-                                let param_type = Self::parse_func_param_type(
-                                    &curr_node.name,
-                                    &param_type_name,
-                                    &edges,
-                                );
-                                if let Some(param_type) = param_type {
-                                    func_param_types
-                                        .entry(curr_node.name.clone())
-                                        .or_insert_with(Vec::new)
-                                        .push(param_type);
+                                    } else {
+                                        Edge {
+                                            r#type: EdgeType::Contains,
+                                            from: file_node.clone(),
+                                            to: curr_node.clone(),
+                                            import: None,
+                                            alias: None,
+                                        }
+                                    };
+                                    edges.push(edge);
                                 }
                             }
-
-                            // There might be multiple parameter types for a method, in which case tree-sitter will
-                            // emit multiple matches for the same function.
-                            //
-                            // We only need to keep one node and one edge for the same method.
-                            if !nodes.contains_key(&curr_node.name) {
-                                nodes.insert(curr_node.name.clone(), curr_node.clone());
-
-                                let edge = if let Some(parent_struct_name) = &parent_struct_name {
-                                    let parent_node_name = curr_node
-                                        .name
-                                        .rsplit_once('.')
-                                        .map(|(prefix, _)| prefix)
-                                        .unwrap();
-                                    // Assume that the parent struct node is defined early in the current file.
-                                    let parent_node = nodes.get(parent_node_name).unwrap();
-                                    Edge {
-                                        r#type: EdgeType::Contains,
-                                        from: parent_node.clone(),
-                                        to: curr_node.clone(),
-                                        import: None,
-                                        alias: None,
-                                    }
-                                } else {
-                                    Edge {
-                                        r#type: EdgeType::Contains,
-                                        from: file_node.clone(),
-                                        to: curr_node.clone(),
-                                        import: None,
-                                        alias: None,
-                                    }
-                                };
-                                edges.push(edge);
-                            }
-                        }
+                        */
                     }
                 }
             }
@@ -567,69 +576,3 @@ impl Parser {
         });
     }
 }
-
-/*
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-
-    #[test]
-    fn test_parse() {
-        // Create test file
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let dir_path = PathBuf::from(manifest_dir)
-            .join("examples")
-            .join("go")
-            .join("demo");
-
-        let mut parser = Parser::new(dir_path.clone());
-        let result = parser.parse(dir_path);
-        match result {
-            Ok((nodes, edges)) => {
-                let mut node_strings: Vec<_> = nodes.into_iter().map(|n| n.name).collect();
-                let mut rel_strings: Vec<_> = edges
-                    .into_iter()
-                    .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
-                    .collect();
-
-                node_strings.sort();
-                rel_strings.sort();
-
-                assert_eq!(
-                    node_strings,
-                    [
-                        "",
-                        "main.go",
-                        "main.go:User",
-                        "main.go:User.DisplayInfo",
-                        "main.go:User.NewUser",
-                        "main.go:User.SetAddress",
-                        "main.go:User.UpdateEmail",
-                        "main.go:main",
-                        "types.go",
-                        "types.go:Address",
-                        "types.go:Hobby"
-                    ]
-                );
-                assert_eq!(
-                    rel_strings,
-                    [
-                        "main.go-[contains]->main.go:User",
-                        "main.go-[contains]->main.go:main",
-                        "main.go:User-[contains]->main.go:User.DisplayInfo",
-                        "main.go:User-[contains]->main.go:User.NewUser",
-                        "main.go:User-[contains]->main.go:User.SetAddress",
-                        "main.go:User-[contains]->main.go:User.UpdateEmail",
-                        "types.go-[contains]->types.go:Address",
-                        "types.go-[contains]->types.go:Hobby"
-                    ],
-                );
-            }
-            Err(e) => {
-                println!("Failed to parse: {:?}", e);
-            }
-        }
-    }
-}
-*/
