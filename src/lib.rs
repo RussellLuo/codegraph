@@ -23,16 +23,16 @@ pub struct Snippet {
 
 pub struct CodeGraph {
     db: Database,
-    parser: Parser,
     repo_path: PathBuf,
+    config: Config,
 }
 
 impl CodeGraph {
     pub fn new(db_path: PathBuf, repo_path: PathBuf, config: Config) -> Self {
         Self {
             db: Database::new(db_path),
-            parser: Parser::new(repo_path.clone(), config),
             repo_path: repo_path,
+            config: config,
         }
     }
 
@@ -40,6 +40,8 @@ impl CodeGraph {
     ///
     /// If `force` is true, the existing files will be re-indexed.
     pub fn index(&mut self, path: PathBuf, force: bool) -> Result<(), Box<dyn std::error::Error>> {
+        let mut parser = Parser::new(self.repo_path.clone(), self.config.clone());
+
         if path == self.repo_path {
             // Try to index the root directory of the repository.
             // We assume that there are many files in the repository, so we need to
@@ -51,17 +53,13 @@ impl CodeGraph {
                 self.db.clean(true)?;
             }
 
-            let (nodes, edges) = self.parser.parse(path.clone())?;
-            self.db.bulk_insert_nodes_via_csv(&nodes)?;
+            let (nodes, edges) = parser.parse(&path)?;
+            let vec_nodes: Vec<Node> = nodes.values().cloned().collect();
+            self.db.bulk_insert_nodes_via_csv(&vec_nodes)?;
             self.db.bulk_insert_edges_via_csv(&edges)?;
 
-            // TODO: needs improvement.
-            let type_edges = self.parser.resolve_func_param_type_edges(
-                &self.parser.nodes,
-                &self.parser.func_param_types,
-                &mut self.db,
-            )?;
-            self.db.bulk_insert_edges_via_csv(&type_edges)?;
+            let resolved_edges = parser.resolve_pending_edges(Some(&mut self.db))?;
+            self.db.bulk_insert_edges_via_csv(&resolved_edges)?;
 
             return Ok(());
         }
@@ -86,7 +84,7 @@ RETURN def;
             );
             let old_nodes = self.db.query_nodes(stmt.as_str())?;
 
-            let (file_node, nodes, edges, func_param_types) = self.parser.parse_file(&path)?;
+            let (nodes, edges) = parser.parse(&path)?;
 
             // Delete outdated nodes.
             // Find nodes that exist in old_nodes but not in nodes (outdated nodes to be deleted)
@@ -123,28 +121,20 @@ DELETE e;
             log::debug!("delete out-going edges: {}", stmt);
             let _ = self.db.query(stmt.as_str())?;
 
-            // Upsert the file node first.
-            self.db.upsert_nodes(&vec![file_node])?;
-
-            // Upsert the rest of the nodes and edges.
+            // Upsert the nodes and edges.
             let vec_nodes: Vec<Node> = nodes.values().cloned().collect();
             self.db.upsert_nodes(&vec_nodes)?;
             self.db.upsert_edges(&edges)?;
 
-            // TODO: needs improvement.
-            let type_edges = self.parser.resolve_func_param_type_edges(
-                &nodes,
-                &func_param_types.unwrap(),
-                &mut self.db,
-            )?;
+            let resolved_edges = parser.resolve_pending_edges(Some(&mut self.db))?;
 
             if log::log_enabled!(log::Level::Debug) {
-                for r in &type_edges {
+                for r in &resolved_edges {
                     log::debug!("type_rel: {}-[{}]{}", r.from.name, r.r#type, r.to.name);
                 }
             }
 
-            self.db.upsert_edges(&type_edges)?;
+            self.db.upsert_edges(&resolved_edges)?;
         } else if path.is_dir() {
             return Err("Not supported yet".into());
         } else {

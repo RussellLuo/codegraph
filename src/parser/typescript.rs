@@ -8,7 +8,7 @@ use tree_sitter::StreamingIterator;
 use tree_sitter_typescript;
 
 use super::common;
-use super::common::QueryPattern;
+use super::common::{PendingImport, QueryPattern};
 use crate::util;
 use crate::FuncParamType;
 use crate::{Edge, EdgeType, Language, Node, NodeType};
@@ -36,6 +36,7 @@ impl Parser {
         (
             IndexMap<String, Node>,
             Vec<Edge>,
+            Option<HashMap<String, Vec<PendingImport>>>,
             Option<HashMap<String, Vec<FuncParamType>>>,
         ),
         Box<dyn std::error::Error>,
@@ -43,6 +44,7 @@ impl Parser {
         let query_source = TYPESCRIPT_DEFINITIONS_QUERY_SOURCE.to_string();
         let mut nodes: IndexMap<String, Node> = IndexMap::new();
         let mut edges: Vec<Edge> = Vec::new();
+        let mut pending_imports: HashMap<String, Vec<PendingImport>> = HashMap::new();
         let mut func_param_types: HashMap<String, Vec<FuncParamType>> = HashMap::new();
 
         let source_code = fs::read(&file_path).expect("Should have been able to read the file");
@@ -64,7 +66,13 @@ impl Parser {
             if let Some(pattern) = QueryPattern::from_repr(mat.pattern_index) {
                 match pattern {
                     QueryPattern::Import => {
-                        /*
+                        let mut import = PendingImport {
+                            language: Language::TypeScript,
+                            source_path: "".to_string(),
+                            symbol: None,
+                            alias: None,
+                        };
+
                         for capture in mat.captures {
                             let capture_name = query.capture_names()[capture.index as usize];
                             let capture_node_text: String = capture
@@ -75,71 +83,85 @@ impl Parser {
                             common::log_capture(&capture, capture_name, &capture_node_text);
 
                             match capture_name {
-                                "reference.namespace_import.name" => {
+                                "reference.namespace_import.alias" => {
                                     // import * as X from 'Y' => X
+                                    import.alias = Some(capture_node_text);
                                 }
                                 "reference.named_import.name" => {
                                     // import { X } from 'Y' => X
+                                    import.symbol = Some(capture_node_text);
                                 }
-                                "reference.default_import.name" => {
+                                "reference.named_import.alias" => {
+                                    // import { X as x } from 'Y' => x
+                                    import.alias = Some(capture_node_text);
+                                }
+                                "reference.default_import.alias" => {
                                     // import X from 'Y' => X
+                                    import.symbol = Some("export default".to_string()); // a special symbol to represent the default export
+                                    import.alias = Some(capture_node_text);
                                 }
-                                "reference.import.path" => {
+                                "reference.import.source" => {
                                     // import X from 'Y' => Y
                                     // import { X } from 'Y' => Y
                                     // import * as X from 'Y' => Y
-                                    let path_name: String = capture
-                                        .node
-                                        .utf8_text(&source_code)
-                                        .unwrap_or("")
-                                        .to_string();
 
-                                    let parts: Vec<&str> = path_name.splitn(2, ' ').collect();
-                                    let (alias, mod_import_path) = match parts.len() {
-                                        // no alias
-                                        1 => (None, parts[0].trim_matches('"').to_string()),
-                                        // alias and path
-                                        2 => (
-                                            Some(parts[0].to_string()),
-                                            parts[1].trim_matches('"').to_string(),
-                                        ),
-                                        _ => unreachable!(),
-                                    };
+                                    // Only handle relative imports for now.
+                                    if capture_node_text.starts_with("./")
+                                        || capture_node_text.starts_with("../")
+                                    {
+                                        // Get the absolute path of the imported file.
+                                        let current_file_dir = file_path.parent().unwrap();
+                                        let import_path = Path::new(&capture_node_text);
+                                        let mut import_file_path =
+                                            current_file_dir.join(import_path);
 
-                                    if let Some(go_module_path) = self.go_module_path.clone() {
-                                        let mod_file_path = util::get_repo_module_file_path(
-                                            &PathBuf::from(""),
-                                            &go_module_path,
-                                            &mod_import_path,
-                                        );
-
-                                        if let Some(mod_file_path) = mod_file_path {
-                                            let parts: Vec<&str> =
-                                                mod_import_path.rsplitn(2, '/').collect();
-                                            let mod_name = parts.first().unwrap_or(&""); // get module name
-
-                                            let edge = Edge {
-                                                r#type: EdgeType::Imports,
-                                                from: Node::from_type_and_name(
-                                                    file_node.r#type.clone(),
-                                                    file_node.name.clone(),
-                                                ),
-                                                to: Node::from_type_and_name(
-                                                    NodeType::Directory,
-                                                    mod_file_path.to_string_lossy().to_string(),
-                                                ),
-                                                import: Some(mod_name.to_string()),
-                                                alias: alias,
-                                            };
-                                            edges.push(edge);
+                                        // If the import path is a directory, append 'index.d.ts', 'index.ts' or 'index.js' to it
+                                        if import_file_path.is_dir() {
+                                            let index_d_ts = import_file_path.join("index.d.ts");
+                                            let index_ts = import_file_path.join("index.ts");
+                                            let index_js = import_file_path.join("index.js");
+                                            if index_d_ts.exists() {
+                                                import_file_path = index_d_ts;
+                                            } else if index_ts.exists() {
+                                                import_file_path = index_ts;
+                                            } else if index_js.exists() {
+                                                import_file_path = index_js;
+                                            }
+                                        } else {
+                                            let file_ts = import_file_path.with_extension("ts");
+                                            let file_js = import_file_path.with_extension("js");
+                                            if file_ts.exists() {
+                                                import_file_path = file_ts;
+                                            } else if file_js.exists() {
+                                                import_file_path = file_js;
+                                            }
                                         }
+
+                                        // Remove ./ or ../ from the import path
+                                        let canonical_file_path = import_file_path
+                                            .canonicalize()
+                                            .unwrap_or(import_file_path.clone());
+                                        import_file_path = canonical_file_path
+                                            .strip_prefix(&self.repo_path)
+                                            .unwrap_or_else(|_| &canonical_file_path)
+                                            .to_path_buf();
+
+                                        import.source_path =
+                                            import_file_path.to_string_lossy().to_string();
                                     }
                                 }
                                 _ => {}
                             }
                         }
-                        */
+
+                        if !import.source_path.is_empty() {
+                            pending_imports
+                                .entry(file_node.name.clone())
+                                .or_insert_with(Vec::new)
+                                .push(import);
+                        }
                     }
+
                     QueryPattern::Interface => {
                         let current_node = common::parse_simple_interface(
                             &query,
@@ -181,6 +203,7 @@ impl Parser {
                             });
                         }
                     }
+
                     QueryPattern::Function => {
                         /*
                         let mut current_node: Option<Node> = None;
@@ -498,7 +521,44 @@ impl Parser {
             }
         }
 
-        Ok((nodes, edges, Some(func_param_types)))
+        Ok((nodes, edges, Some(pending_imports), Some(func_param_types)))
+    }
+
+    pub fn resolve_pending_imports(
+        &self,
+        nodes: &IndexMap<String, Node>,
+        pending_imports: &HashMap<String, Vec<PendingImport>>,
+    ) -> Result<Vec<Edge>, Box<dyn std::error::Error>> {
+        let mut edges: Vec<Edge> = Vec::new();
+
+        for (file_node_name, pending_imports) in pending_imports {
+            for imp in pending_imports {
+                log::trace!(
+                    "{file_node_name} => {}, {:?}, {:?}",
+                    imp.source_path,
+                    imp.symbol,
+                    imp.alias
+                );
+
+                let mut imported_node_name = imp.source_path.clone();
+                if let Some(imp_symbol) = &imp.symbol {
+                    imported_node_name = format!("{}:{}", imp.source_path, imp_symbol);
+                }
+                let file_node = nodes.get(file_node_name);
+                let imported_node = nodes.get(&imported_node_name);
+                if let (Some(file_node), Some(imported_node)) = (file_node, imported_node) {
+                    edges.push(Edge {
+                        r#type: EdgeType::Imports,
+                        from: file_node.clone(),
+                        to: imported_node.clone(),
+                        import: imp.symbol.clone(),
+                        alias: imp.alias.clone(),
+                    })
+                }
+            }
+        }
+
+        Ok(edges)
     }
 
     fn parse_func_param_type(

@@ -14,6 +14,17 @@ pub enum QueryPattern {
     Method,
 }
 
+/// A pending import relationship that needs to be resolved as an edge.
+pub struct PendingImport {
+    pub language: Language,
+    // The path of the source (imported) module
+    pub source_path: String,
+    // None if the entire source module is imported
+    // - TypeScript: Some<"export default"> if the default export is imported
+    pub symbol: Option<String>,
+    pub alias: Option<String>,
+}
+
 pub fn parse_simple_interface(
     query: &tree_sitter::Query,
     mat: &tree_sitter::QueryMatch,

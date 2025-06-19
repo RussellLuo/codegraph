@@ -1,18 +1,21 @@
-; Pattern 0: Import Statements
+; Pattern 0: Import Declarations
 (import_statement
-  (import_clause
-    [
-      (
-        namespace_import (identifier) @reference.namespace_import.name
+  (import_clause [
+    (
+      namespace_import (identifier) @reference.namespace_import.alias
+    )
+    (
+      named_imports (
+        import_specifier [
+          name: (identifier) @reference.named_import.name
+          alias: (identifier) @reference.named_import.alias
+        ]
       )
-      (
-        named_imports (import_specifier) @reference.named_import.name
-      )
-      (
-        (identifier) @reference.default_import.name
-      )
-    ]
-  )
+    )
+    (
+      (identifier) @reference.default_import.alias
+    )
+  ])
   source: (
     string (string_fragment) @reference.import.source
   )
