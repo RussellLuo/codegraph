@@ -27,6 +27,7 @@ enum QueryPattern {
     Class,
     Function,
     Method,
+    TypeAlias,
 }
 
 pub struct Parser {
@@ -496,6 +497,27 @@ impl Parser {
                                 };
                                 edges.push(edge);
                             }
+                        }
+                    }
+
+                    QueryPattern::TypeAlias => {
+                        let current_node = common::parse_simple_type_alias(
+                            &query,
+                            &mat,
+                            &self.repo_path,
+                            file_node,
+                            file_path,
+                            &source_code,
+                        );
+                        if let Some(curr_node) = current_node {
+                            nodes.insert(curr_node.name.clone(), curr_node.clone());
+                            edges.push(Edge {
+                                r#type: EdgeType::Contains,
+                                from: file_node.clone(),
+                                to: curr_node.clone(),
+                                import: None,
+                                alias: None,
+                            });
                         }
                     }
                 }

@@ -82,3 +82,11 @@
   )
   body: (block) @definition.method.body
 ) @definition.method
+
+; Pattern 5: Type Alias Declarations
+(type_declaration (
+  (type_spec
+    name: (type_identifier) @definition.type_alias.name
+    type: (type_identifier)
+  ) @definition.type_alias
+))

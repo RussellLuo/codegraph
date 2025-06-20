@@ -38,6 +38,9 @@ func (u *User) SetAddress(addr *Address, hobby *Hobby) {
 	u.Address = addr
 }
 
+func (u *User) ChangeStatus(s Status) {
+}
+
 func main() {
 	user := NewUser(1, "gopher", "gopher@example.com")
 

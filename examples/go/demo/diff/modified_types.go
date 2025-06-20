@@ -11,3 +11,5 @@ type (
 		Music  bool
 	}
 )
+
+type Status int

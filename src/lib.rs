@@ -323,6 +323,7 @@ mod tests {
                 ".",
                 "main.go",
                 "main.go:User",
+                "main.go:User.ChangeStatus",
                 "main.go:User.DisplayInfo",
                 "main.go:User.NewUser",
                 "main.go:User.SetAddress",
@@ -330,8 +331,9 @@ mod tests {
                 "main.go:main",
                 "types.go",
                 "types.go:Address",
-                "types.go:Hobby"
-            ]
+                "types.go:Hobby",
+                "types.go:Status"
+            ],
         );
         assert_eq!(
             edge_strings,
@@ -340,14 +342,17 @@ mod tests {
                 ".-[contains]->types.go",
                 "main.go-[contains]->main.go:User",
                 "main.go-[contains]->main.go:main",
+                "main.go:User-[contains]->main.go:User.ChangeStatus",
                 "main.go:User-[contains]->main.go:User.DisplayInfo",
                 "main.go:User-[contains]->main.go:User.NewUser",
                 "main.go:User-[contains]->main.go:User.SetAddress",
                 "main.go:User-[contains]->main.go:User.UpdateEmail",
+                "main.go:User.ChangeStatus-[references]->types.go:Status",
                 "main.go:User.SetAddress-[references]->types.go:Address",
                 "main.go:User.SetAddress-[references]->types.go:Hobby",
                 "types.go-[contains]->types.go:Address",
-                "types.go-[contains]->types.go:Hobby"
+                "types.go-[contains]->types.go:Hobby",
+                "types.go-[contains]->types.go:Status"
             ],
         );
 
@@ -371,7 +376,7 @@ mod tests {
             .index(repo_path.clone().join("types.go"), true)
             .unwrap();
 
-        // 2.2 assert data
+        // 2.2 validate data
         let final_nodes = graph.query_nodes("MATCH (n) RETURN n".to_string()).unwrap();
         let final_edges = graph
             .query_edges("MATCH (a)-[e]->(b) RETURN a.name, b.name, e".to_string())
@@ -391,6 +396,7 @@ mod tests {
                 ".",
                 "main.go",
                 "main.go:User",
+                "main.go:User.ChangeStatus",
                 "main.go:User.DisplayInfo",
                 "main.go:User.NewUser",
                 "main.go:User.SetAddress",
@@ -398,8 +404,9 @@ mod tests {
                 "main.go:main",
                 "types.go",
                 "types.go:Address2",
-                "types.go:Hobby"
-            ]
+                "types.go:Hobby",
+                "types.go:Status"
+            ],
         );
         assert_eq!(
             edge_strings,
@@ -408,13 +415,16 @@ mod tests {
                 ".-[contains]->types.go",
                 "main.go-[contains]->main.go:User",
                 "main.go-[contains]->main.go:main",
+                "main.go:User-[contains]->main.go:User.ChangeStatus",
                 "main.go:User-[contains]->main.go:User.DisplayInfo",
                 "main.go:User-[contains]->main.go:User.NewUser",
                 "main.go:User-[contains]->main.go:User.SetAddress",
                 "main.go:User-[contains]->main.go:User.UpdateEmail",
+                "main.go:User.ChangeStatus-[references]->types.go:Status",
                 "main.go:User.SetAddress-[references]->types.go:Hobby",
                 "types.go-[contains]->types.go:Address2",
-                "types.go-[contains]->types.go:Hobby"
+                "types.go-[contains]->types.go:Hobby",
+                "types.go-[contains]->types.go:Status"
             ],
         );
 
