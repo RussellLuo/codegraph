@@ -252,12 +252,7 @@ impl Parser {
                                     }
                                 }
                                 "definition.function.param_type" => {
-                                    let param_type_name: String = capture
-                                        .node
-                                        .utf8_text(&source_code)
-                                        .unwrap_or("")
-                                        .to_string();
-                                    param_type_names.push(param_type_name);
+                                    param_type_names.push(capture_node_text);
                                 }
                                 "definition.function.body" => {
                                     if let Some(current_tree_sitter_main_node) =
@@ -309,10 +304,10 @@ impl Parser {
                                 }
                             }
 
-                            // There might be multiple parameter types for a method, in which case tree-sitter will
+                            // There might be multiple parameter types for a function, in which case tree-sitter will
                             // emit multiple matches for the same function.
                             //
-                            // We only need to keep one node and one edge for the same method.
+                            // We only need to keep one node and one edge for the same function.
                             if !nodes.contains_key(&curr_node.name) {
                                 nodes.insert(curr_node.name.clone(), curr_node.clone());
 
@@ -407,12 +402,7 @@ impl Parser {
                                     }
                                 }
                                 "definition.method.param_type" => {
-                                    let param_type_name: String = capture
-                                        .node
-                                        .utf8_text(&source_code)
-                                        .unwrap_or("")
-                                        .to_string();
-                                    param_type_names.push(param_type_name);
+                                    param_type_names.push(capture_node_text);
                                 }
                                 "definition.method.body" => {
                                     if let Some(current_tree_sitter_main_node) =
@@ -449,7 +439,7 @@ impl Parser {
                                 );
                             }
 
-                            // Parse the parameter types of the current function.
+                            // Parse the parameter types of the current method.
                             for param_type_name in param_type_names {
                                 let param_type = Self::parse_func_param_type(
                                     &curr_node.name,
@@ -465,7 +455,7 @@ impl Parser {
                             }
 
                             // There might be multiple parameter types for a method, in which case tree-sitter will
-                            // emit multiple matches for the same function.
+                            // emit multiple matches for the same method.
                             //
                             // We only need to keep one node and one edge for the same method.
                             if !nodes.contains_key(&curr_node.name) {

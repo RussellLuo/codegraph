@@ -32,7 +32,7 @@ class UserService {
     }
 
     // 实例方法
-    public async getUsers(): Promise<User[]> {
+    public async getUser(userID: UserID): Promise<User[]> {
         try {
             const response = await axios.get<User[]>(this.apiUrl);
             return response.data;

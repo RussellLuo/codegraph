@@ -29,6 +29,7 @@ enum QueryPattern {
     Interface,
     Class,
     Function,
+    Method,
     Enum,
     TypeAlias,
 }
@@ -263,12 +264,7 @@ impl Parser {
                                     }
                                 }
                                 "definition.function.param_type" => {
-                                    let param_type_name: String = capture
-                                        .node
-                                        .utf8_text(&source_code)
-                                        .unwrap_or("")
-                                        .to_string();
-                                    param_type_names.push(param_type_name);
+                                    param_type_names.push(capture_node_text);
                                 }
                                 "definition.function.body" => {
                                     if let Some(current_tree_sitter_main_node) =
@@ -306,10 +302,10 @@ impl Parser {
                                 }
                             }
 
-                            // There might be multiple parameter types for a method, in which case tree-sitter will
+                            // There might be multiple parameter types for a function, in which case tree-sitter will
                             // emit multiple matches for the same function.
                             //
-                            // We only need to keep one node and one edge for the same method.
+                            // We only need to keep one node and one edge for the same function.
                             if !nodes.contains_key(&curr_node.name) {
                                 nodes.insert(curr_node.name.clone(), curr_node.clone());
                                 edges.push(Edge {
@@ -319,6 +315,118 @@ impl Parser {
                                     import: None,
                                     alias: None,
                                 });
+                            }
+                        }
+                    }
+
+                    QueryPattern::Method => {
+                        let mut current_node: Option<Node> = None;
+                        let mut method_name: Option<String> = None;
+                        let mut parent_class_name: Option<String> = None;
+                        let mut current_tree_sitter_main_node: Option<tree_sitter::Node> = None;
+                        let mut param_type_names: Vec<String> = Vec::new();
+
+                        for capture in mat.captures {
+                            let capture_name = query.capture_names()[capture.index as usize];
+                            let capture_node_text: String = capture
+                                .node
+                                .utf8_text(&source_code)
+                                .unwrap_or("")
+                                .to_string();
+                            common::log_capture(&capture, capture_name, &capture_node_text);
+
+                            match capture_name {
+                                "definition.class.name" => {
+                                    // Due to the behavior of tree-sitter, the class name will be captured multiple times
+                                    // if there are multiple methods in the class.
+                                    parent_class_name = Some(capture_node_text);
+                                }
+                                "definition.method" => {
+                                    current_node = Some(Node {
+                                        name: "".to_string(), // fill in later
+                                        r#type: NodeType::Function,
+                                        language: file_node.language.clone(),
+                                        start_line: capture.node.start_position().row,
+                                        end_line: capture.node.end_position().row,
+                                        code: capture_node_text,
+                                        skeleton_code: String::new(),
+                                    });
+                                    current_tree_sitter_main_node = Some(capture.node);
+                                }
+                                "definition.method.name" => {
+                                    method_name = Some(capture_node_text);
+                                }
+                                "definition.method.param_type" => {
+                                    param_type_names.push(capture_node_text);
+                                }
+                                "definition.method.body" => {
+                                    if let Some(current_tree_sitter_main_node) =
+                                        current_tree_sitter_main_node
+                                    {
+                                        let start_byte = current_tree_sitter_main_node.start_byte();
+                                        let body_start_byte = capture.node.start_byte();
+                                        if let Some(curr_node) = &mut current_node {
+                                            // Skip the body and keep only the signature.
+                                            curr_node.skeleton_code = String::from_utf8_lossy(
+                                                &source_code[start_byte..body_start_byte],
+                                            )
+                                            .to_string()
+                                                + "{\n...\n}";
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        if let (Some(curr_node), Some(parent_class_name), Some(method_name)) =
+                            (&mut current_node, parent_class_name, method_name)
+                        {
+                            let parent_class_node_name = format!(
+                                "{}:{}",
+                                file_node.name.clone(),
+                                parent_class_name.clone(),
+                            );
+                            curr_node.name = format!(
+                                "{}.{}",
+                                parent_class_node_name.clone(),
+                                method_name.clone(),
+                            );
+
+                            // Parse the parameter types of the current method.
+                            for param_type_name in param_type_names {
+                                let param_types = Self::parse_func_param_types(
+                                    &curr_node.name,
+                                    &param_type_name,
+                                    &import_name_to_source_path,
+                                );
+                                for param_type in param_types {
+                                    func_param_types
+                                        .entry(curr_node.name.clone())
+                                        .or_insert_with(Vec::new)
+                                        .push(param_type);
+                                }
+                            }
+
+                            // There might be multiple parameter types for a method, in which case tree-sitter will
+                            // emit multiple matches for the same method.
+                            //
+                            // We only need to keep one node and one edge for the same method.
+                            if !nodes.contains_key(&curr_node.name) {
+                                nodes.insert(curr_node.name.clone(), curr_node.clone());
+
+                                // Find the parent class node.
+                                // Here we assume that the parent class has been parsed and added into nodes.
+                                let parent_class_node = nodes.get(&parent_class_node_name);
+                                if let Some(parent_class_node) = parent_class_node {
+                                    edges.push(Edge {
+                                        r#type: EdgeType::Contains,
+                                        from: parent_class_node.clone(),
+                                        to: curr_node.clone(),
+                                        import: None,
+                                        alias: None,
+                                    });
+                                }
                             }
                         }
                     }
@@ -627,17 +735,19 @@ impl Parser {
             let mut source_node_name: Option<String> = None;
             if let Some(module_name) = &module_name {
                 // Find the target module name that the type belongs to.
-                if let Some(file_node_name) = import_name_to_source_path.get(module_name) {
-                    source_node_name = Some(file_node_name.clone());
+                // Set it to be None if not found.
+                if let Some(source_path) = import_name_to_source_path.get(module_name) {
+                    source_node_name = Some(source_path.clone());
                 }
-                // If the module name has not been imported, let the corresponding node name be None.
             } else {
                 // Otherwise, the type might has been directly imported.
-                if let Some(file_node_name) = import_name_to_source_path.get(&type_name) {
-                    source_node_name = Some(file_node_name.clone());
+                if let Some(source_path) = import_name_to_source_path.get(&type_name) {
+                    source_node_name = Some(source_path.clone());
                 } else {
                     // Finally, the type might be defined in the same file.
-                    source_node_name = Some(from_node_name.clone());
+                    if let Some(from_file_node_name) = from_node_name.splitn(2, ":").next() {
+                        source_node_name = Some(from_file_node_name.into());
+                    }
                 }
             }
 

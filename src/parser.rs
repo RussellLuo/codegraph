@@ -89,6 +89,7 @@ impl ParserConfig {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct FuncParamType {
     type_name: String,
     package_name: Option<String>,

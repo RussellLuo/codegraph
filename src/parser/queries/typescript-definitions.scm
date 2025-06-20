@@ -61,13 +61,48 @@
   body: (statement_block) @definition.function.body
 ) @definition.function
 
-; Pattern 4: Enum Declarations
+; Pattern 4: Method Declarations
+(class_declaration
+  name: (type_identifier) @definition.class.name
+  body: (
+    class_body (
+      method_definition
+        (accessibility_modifier)?
+        name: (property_identifier) @definition.method.name
+        parameters: (
+          (formal_parameters
+            [
+              (required_parameter
+                type: (_) @definition.method.param_type
+              )?
+              (optional_parameter
+                type: (_) @definition.method.param_type
+              )?
+            ]
+          )
+        )
+        return_type: (
+          type_annotation (
+            [
+              (predefined_type)
+              (type_identifier)
+              (tuple_type)
+              (generic_type)
+            ]
+          )
+        )?
+        body: (statement_block) @definition.method.body
+    ) @definition.method
+  )
+)
+
+; Pattern 5: Enum Declarations
 (enum_declaration
   name: (identifier) @definition.enum.name
   body: (enum_body)
 ) @definition.enum
 
-; Pattern 5: Type Alias Declarations
+; Pattern 6: Type Alias Declarations
 (type_alias_declaration
   name: (type_identifier) @definition.type_alias.name
 ) @definition.type_alias
