@@ -100,8 +100,8 @@ pub struct Parser {
     nodes: IndexMap<String, Node>,
     edges: Vec<Edge>,
 
-    pending_imports: HashMap<String, Vec<PendingImport>>, // file node name -> imported info
-    func_param_types: HashMap<String, Vec<FuncParamType>>, // function name -> parameter types
+    pending_imports: HashMap<Language, HashMap<String, Vec<PendingImport>>>, // language -> (file node name -> imported info)
+    func_param_types: HashMap<Language, HashMap<String, Vec<FuncParamType>>>, // language -> (function name -> parameter types)
 
     // Language-specific parsers
     go_parser: go::Parser,
@@ -140,21 +140,29 @@ impl Parser {
         if path.is_dir() {
             self.traverse_directory(&path)?;
         } else if path.is_file() {
-            let (file_node, nodes, rels, pending_imports, func_param_types) =
+            let (file_node, nodes, edges, pending_imports, func_param_types) =
                 self.parse_file(&path)?;
 
-            self.nodes.insert(file_node.name.clone(), file_node); // Add file node to nodes map
+            let language = file_node.language.clone();
+            let file_node_name = file_node.name.clone();
+            self.nodes.insert(file_node_name.clone(), file_node); // Add file node to nodes map
             for (n_name, n) in nodes {
                 self.nodes.insert(n_name, n);
             }
-            for r in rels {
-                self.edges.push(r);
+            for edge in edges {
+                self.edges.push(edge);
             }
-            if let Some(pending_imports) = pending_imports {
-                self.pending_imports.extend(pending_imports);
+            if pending_imports.len() > 0 {
+                self.pending_imports
+                    .entry(language.clone())
+                    .or_insert_with(HashMap::new)
+                    .insert(file_node_name.clone(), pending_imports);
             }
             if let Some(func_param_types) = func_param_types {
-                self.func_param_types.extend(func_param_types);
+                self.func_param_types
+                    .entry(language.clone())
+                    .or_insert_with(HashMap::new)
+                    .extend(func_param_types);
             }
         } else {
             return Err("Invalid path".into());
@@ -175,8 +183,7 @@ impl Parser {
         }
 
         if let Some(db) = db {
-            let ref_edges =
-                self.resolve_func_param_type_edges(&self.nodes, &self.func_param_types, db)?;
+            let ref_edges = self.resolve_func_param_type_edges(db)?;
             for edge in ref_edges {
                 edges.push(edge);
             }
@@ -185,80 +192,46 @@ impl Parser {
         Ok(edges)
     }
 
-    pub fn resolve_pending_imports(&self) -> Result<Vec<Edge>, Box<dyn std::error::Error>> {
-        // TypeScript-specific import resolution
-        return self
-            .typescript_parser
-            .resolve_pending_imports(&self.nodes, &self.pending_imports);
+    fn resolve_pending_imports(&self) -> Result<Vec<Edge>, Box<dyn std::error::Error>> {
+        for (language, pending_imports) in &self.pending_imports {
+            match language {
+                Language::TypeScript => {
+                    return self
+                        .typescript_parser
+                        .resolve_pending_imports(&self.nodes, &pending_imports);
+                }
+                _ => {}
+            }
+        }
 
         Ok(vec![])
     }
 
-    pub fn resolve_func_param_type_edges(
+    fn resolve_func_param_type_edges(
         &self,
-        nodes: &IndexMap<String, Node>,
-        func_param_types: &HashMap<String, Vec<FuncParamType>>,
         db: &mut Database,
     ) -> Result<Vec<Edge>, Box<dyn std::error::Error>> {
         let mut edges: Vec<Edge> = Vec::new();
 
-        let mut pkg_types: IndexMap<String, HashSet<String>> = IndexMap::new();
-        for (func_name, param_types) in func_param_types {
-            for param_type in param_types {
-                if let Some(package_name) = &param_type.package_name {
-                    pkg_types
-                        .entry(package_name.clone())
-                        .or_insert_with(HashSet::new)
-                        .insert(param_type.type_name.clone());
-                };
-            }
-        }
-
-        let mut pkgtype_to_node = IndexMap::new(); // "{pkg_name}:{type_name}" => type_node
-        for (pkg_name, type_names) in pkg_types {
-            let quoted_type_names: Vec<String> = type_names
-                .iter()
-                .map(|s| format!("\"{}\"", s.to_lowercase()))
-                .collect();
-            let type_names_str = format!("[{}]", quoted_type_names.join(", "));
-            let stmt = format!(
-                r#"
-MATCH (pkg {{ name: "{}" }})
-MATCH (pkg)-[:CONTAINS*2]->(typ)
-WHERE typ.short_name IN {}
-RETURN typ;
-                "#,
-                pkg_name, type_names_str,
-            );
-            log::trace!("Query Stmt: {:}", stmt);
-            let nodes = db.query_nodes(stmt.as_str())?;
-
-            for node in &nodes {
-                pkgtype_to_node.insert(format!("{}:{}", pkg_name, node.short_name()), node.clone());
-            }
-        }
-
-        for (func_name, param_types) in func_param_types {
-            let func_node = nodes.get(func_name);
-
-            for param_type in param_types {
-                if let Some(package_name) = &param_type.package_name {
-                    let mut type_node = pkgtype_to_node.get(&format!(
-                        "{}:{}",
-                        package_name,
-                        param_type.type_name.to_lowercase()
-                    ));
-                    if let (Some(func_node), Some(type_node)) = (func_node, type_node) {
-                        let rel = Edge {
-                            r#type: EdgeType::References,
-                            from: func_node.clone(),
-                            to: type_node.clone(),
-                            import: None,
-                            alias: None,
-                        };
-                        edges.push(rel);
-                    }
+        for (language, func_param_types) in &self.func_param_types {
+            match language {
+                Language::Go => {
+                    let go_edges = self.go_parser.resolve_func_param_type_edges(
+                        &self.nodes,
+                        &func_param_types,
+                        db,
+                    )?;
+                    edges.extend(go_edges);
                 }
+                Language::TypeScript => {
+                    let ts_edges = self.typescript_parser.resolve_func_param_type_edges(
+                        &self.nodes,
+                        &func_param_types,
+                        db,
+                    )?;
+                    edges.extend(ts_edges);
+                }
+                _ => {}
             }
         }
 
@@ -413,19 +386,26 @@ RETURN typ;
                             skeleton_code: String::from(""),
                         }
                     } else {
-                        let (file_node, nodes, rels, pending_imports, func_param_types) =
+                        let (file_node, nodes, edges, pending_imports, func_param_types) =
                             self.parse_file(&entry_path)?;
+                        let language = file_node.language.clone();
                         for (n_name, n) in nodes {
                             self.nodes.insert(n_name, n);
                         }
-                        for r in rels {
-                            self.edges.push(r);
+                        for edge in edges {
+                            self.edges.push(edge);
                         }
-                        if let Some(pending_imports) = pending_imports {
-                            self.pending_imports.extend(pending_imports);
+                        if pending_imports.len() > 0 {
+                            self.pending_imports
+                                .entry(language.clone())
+                                .or_insert_with(HashMap::new)
+                                .insert(file_node.name.clone(), pending_imports);
                         }
                         if let Some(func_param_types) = func_param_types {
-                            self.func_param_types.extend(func_param_types);
+                            self.func_param_types
+                                .entry(language.clone())
+                                .or_insert_with(HashMap::new)
+                                .extend(func_param_types);
                         }
 
                         // Sleep for a short duration to avoid high CPU usage during traversal.
@@ -505,7 +485,7 @@ RETURN typ;
             Node,
             IndexMap<String, Node>,
             Vec<Edge>,
-            Option<HashMap<String, Vec<PendingImport>>>,
+            Vec<PendingImport>,
             Option<HashMap<String, Vec<FuncParamType>>>,
         ),
         Box<dyn std::error::Error>,
@@ -527,24 +507,24 @@ RETURN typ;
         // Parse the file and add parsed nodes to the collection
         match file_node.language {
             Language::Go => {
-                let (nodes, rels, func_param_types) =
+                let (nodes, edges, func_param_types) =
                     self.go_parser.parse(&file_node, &file_path.to_path_buf())?;
-                return Ok((file_node, nodes, rels, None, func_param_types));
+                return Ok((file_node, nodes, edges, vec![], func_param_types));
             }
             Language::TypeScript => {
-                let (nodes, rels, pending_imports, func_param_types) = self
+                let (nodes, edges, pending_imports, func_param_types) = self
                     .typescript_parser
                     .parse(&file_node, &file_path.to_path_buf())?;
-                return Ok((file_node, nodes, rels, pending_imports, func_param_types));
+                return Ok((file_node, nodes, edges, pending_imports, func_param_types));
             }
             Language::Python => {
-                let (nodes, rels) = self
+                let (nodes, edges) = self
                     .python_parser
                     .parse(&file_node, &file_path.to_path_buf())?;
-                return Ok((file_node, nodes, rels, None, None));
+                return Ok((file_node, nodes, edges, vec![], None));
             }
             Language::Text => {
-                return Ok((file_node, IndexMap::new(), vec![], None, None));
+                return Ok((file_node, IndexMap::new(), vec![], vec![], None));
             }
         }
     }
@@ -554,6 +534,13 @@ RETURN typ;
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    fn init() {
+        let _ = env_logger::builder()
+            .filter_level(log::LevelFilter::Info)
+            .is_test(true)
+            .try_init();
+    }
 
     #[test]
     fn test_parse_python() {
@@ -646,6 +633,8 @@ mod tests {
 
     #[test]
     fn test_parse_typescript() {
+        init();
+
         // Create test file
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let dir_path = PathBuf::from(manifest_dir)
@@ -657,9 +646,10 @@ mod tests {
 
         let mut parser = Parser::new(dir_path.clone(), config);
         let result = parser.parse(&dir_path);
+        let mut db = Database::new(PathBuf::from(""));
         match result {
             Ok((nodes, edges)) => {
-                let result = parser.resolve_pending_edges(None);
+                let result = parser.resolve_pending_edges(Some(&mut db));
                 match result {
                     Err(e) => {
                         println!("Failed to resolve pending edges: {:?}", e);
@@ -684,6 +674,8 @@ mod tests {
                             [
                                 "",
                                 "main.ts",
+                                "main.ts:fetchUserData",
+                                "main.ts:greetUser",
                                 "types.ts",
                                 "types.ts:User",
                                 "types.ts:UserService"
@@ -694,8 +686,11 @@ mod tests {
                             [
                                 "-[contains]->main.ts",
                                 "-[contains]->types.ts",
+                                "main.ts-[contains]->main.ts:fetchUserData",
+                                "main.ts-[contains]->main.ts:greetUser",
                                 "main.ts-[imports]->types.ts:User",
                                 "main.ts-[imports]->types.ts:UserService",
+                                "main.ts:greetUser-[references]->types.ts:User",
                                 "types.ts-[contains]->types.ts:User",
                                 "types.ts-[contains]->types.ts:UserService"
                             ],

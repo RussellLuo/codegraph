@@ -34,7 +34,16 @@ pub enum EdgeType {
     References,
 }
 
-#[derive(Debug, Clone, strum_macros::Display, strum_macros::EnumString, serde::Serialize)]
+#[derive(
+    Hash,
+    Eq,
+    PartialEq,
+    Debug,
+    Clone,
+    strum_macros::Display,
+    strum_macros::EnumString,
+    serde::Serialize,
+)]
 pub enum Language {
     Text,
     Go,

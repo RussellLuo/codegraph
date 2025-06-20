@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -10,6 +11,7 @@ use tree_sitter_typescript;
 use super::common;
 use super::common::{PendingImport, QueryPattern};
 use crate::util;
+use crate::Database;
 use crate::FuncParamType;
 use crate::{Edge, EdgeType, Language, Node, NodeType};
 
@@ -36,7 +38,7 @@ impl Parser {
         (
             IndexMap<String, Node>,
             Vec<Edge>,
-            Option<HashMap<String, Vec<PendingImport>>>,
+            Vec<PendingImport>,
             Option<HashMap<String, Vec<FuncParamType>>>,
         ),
         Box<dyn std::error::Error>,
@@ -44,8 +46,10 @@ impl Parser {
         let query_source = TYPESCRIPT_DEFINITIONS_QUERY_SOURCE.to_string();
         let mut nodes: IndexMap<String, Node> = IndexMap::new();
         let mut edges: Vec<Edge> = Vec::new();
-        let mut pending_imports: HashMap<String, Vec<PendingImport>> = HashMap::new();
+        let mut pending_imports: Vec<PendingImport> = Vec::new();
         let mut func_param_types: HashMap<String, Vec<FuncParamType>> = HashMap::new();
+
+        let mut import_name_to_source_path: HashMap<String, String> = HashMap::new(); // Maps import names to their corresponding source paths
 
         let source_code = fs::read(&file_path).expect("Should have been able to read the file");
 
@@ -89,6 +93,7 @@ impl Parser {
                                 }
                                 "reference.named_import.name" => {
                                     // import { X } from 'Y' => X
+                                    // import { X as x } from 'Y' => X
                                     import.symbol = Some(capture_node_text);
                                 }
                                 "reference.named_import.alias" => {
@@ -155,10 +160,10 @@ impl Parser {
                         }
 
                         if !import.source_path.is_empty() {
-                            pending_imports
-                                .entry(file_node.name.clone())
-                                .or_insert_with(Vec::new)
-                                .push(import);
+                            pending_imports.push(import.clone());
+
+                            import_name_to_source_path
+                                .insert(import.import_name(), import.source_path.clone());
                         }
                     }
 
@@ -205,26 +210,18 @@ impl Parser {
                     }
 
                     QueryPattern::Function => {
-                        /*
                         let mut current_node: Option<Node> = None;
                         let mut current_tree_sitter_main_node: Option<tree_sitter::Node> = None;
-                        let mut parent_struct_name: Option<String> = None;
                         let mut param_type_names: Vec<String> = Vec::new();
 
                         for capture in mat.captures {
-                            let start = capture.node.start_position();
-                            let end = capture.node.end_position();
                             let capture_name = query.capture_names()[capture.index as usize];
                             let capture_node_text: String = capture
                                 .node
                                 .utf8_text(&source_code)
                                 .unwrap_or("")
                                 .to_string();
-                            log::trace!(
-                                "[CAPTURE]\nname: {capture_name}, start: {start}, end: {end}, text: {:?}, capture: {:?}",
-                                capture_node_text,
-                                capture.node.to_sexp()
-                            );
+                            common::log_capture(&capture, capture_name, &capture_node_text);
 
                             match capture_name {
                                 "definition.function" => {
@@ -249,21 +246,6 @@ impl Parser {
                                                 .to_string_lossy(),
                                             capture_node_text
                                         );
-                                    }
-                                }
-                                "definition.function.first_return_type" => {
-                                    // The current function is a struct constructor
-                                    let struct_node_name = format!(
-                                        "{}:{}",
-                                        Path::new(file_path)
-                                            .strip_prefix(&self.repo_path)
-                                            .unwrap_or_else(|_| Path::new(file_path))
-                                            .to_string_lossy(),
-                                        capture_node_text,
-                                    );
-                                    // Assume that the struct node is defined early in the current file.
-                                    if nodes.contains_key(&struct_node_name) {
-                                        parent_struct_name = Some(capture_node_text);
                                     }
                                 }
                                 "definition.function.param_type" => {
@@ -295,28 +277,14 @@ impl Parser {
                         }
 
                         if let Some(curr_node) = &mut current_node {
-                            // Change the name of the current node to include the parent struct name, if any.
-                            if let Some(parent_struct_name) = &parent_struct_name {
-                                let node_name = curr_node.name.rsplit(':').next().unwrap_or("");
-                                curr_node.name = format!(
-                                    "{}:{}.{}",
-                                    Path::new(file_path)
-                                        .strip_prefix(&self.repo_path)
-                                        .unwrap_or_else(|_| Path::new(file_path))
-                                        .to_string_lossy(),
-                                    parent_struct_name.clone(),
-                                    node_name
-                                );
-                            }
-
                             // Parse the parameter types of the current function.
                             for param_type_name in param_type_names {
-                                let param_type = Self::parse_func_param_type(
+                                let param_types = Self::parse_func_param_types(
                                     &curr_node.name,
                                     &param_type_name,
-                                    &edges,
+                                    &import_name_to_source_path,
                                 );
-                                if let Some(param_type) = param_type {
+                                for param_type in param_types {
                                     func_param_types
                                         .entry(curr_node.name.clone())
                                         .or_insert_with(Vec::new)
@@ -330,35 +298,15 @@ impl Parser {
                             // We only need to keep one node and one edge for the same method.
                             if !nodes.contains_key(&curr_node.name) {
                                 nodes.insert(curr_node.name.clone(), curr_node.clone());
-
-                                let edge = if let Some(parent_struct_name) = &parent_struct_name {
-                                    let parent_node_name = curr_node
-                                        .name
-                                        .rsplit_once('.')
-                                        .map(|(prefix, _)| prefix)
-                                        .unwrap();
-                                    // Assume that the parent struct node is defined early in the current file.
-                                    let parent_node = nodes.get(parent_node_name).unwrap();
-                                    Edge {
-                                        r#type: EdgeType::Contains,
-                                        from: parent_node.clone(),
-                                        to: curr_node.clone(),
-                                        import: None,
-                                        alias: None,
-                                    }
-                                } else {
-                                    Edge {
-                                        r#type: EdgeType::Contains,
-                                        from: file_node.clone(),
-                                        to: curr_node.clone(),
-                                        import: None,
-                                        alias: None,
-                                    }
-                                };
-                                edges.push(edge);
+                                edges.push(Edge {
+                                    r#type: EdgeType::Contains,
+                                    from: file_node.clone(),
+                                    to: curr_node.clone(),
+                                    import: None,
+                                    alias: None,
+                                });
                             }
                         }
-                        */
                     }
 
                     QueryPattern::Method => {
@@ -468,7 +416,7 @@ impl Parser {
 
                                 // Parse the parameter types of the current function.
                                 for param_type_name in param_type_names {
-                                    let param_type = Self::parse_func_param_type(
+                                    let param_type = Self::parse_func_param_types(
                                         &curr_node.name,
                                         &param_type_name,
                                         &edges,
@@ -521,7 +469,7 @@ impl Parser {
             }
         }
 
-        Ok((nodes, edges, Some(pending_imports), Some(func_param_types)))
+        Ok((nodes, edges, pending_imports, Some(func_param_types)))
     }
 
     pub fn resolve_pending_imports(
@@ -561,78 +509,194 @@ impl Parser {
         Ok(edges)
     }
 
-    fn parse_func_param_type(
+    pub fn resolve_func_param_type_edges(
+        &self,
+        nodes: &IndexMap<String, Node>,
+        func_param_types: &HashMap<String, Vec<FuncParamType>>,
+        db: &mut Database,
+    ) -> Result<Vec<Edge>, Box<dyn std::error::Error>> {
+        let mut edges: Vec<Edge> = Vec::new();
+
+        for (func_node_name, param_types) in func_param_types {
+            let func_node = nodes.get(func_node_name);
+            if let Some(func_node) = func_node {
+                for param_type in param_types {
+                    if let Some(file_node_name) = &param_type.package_name {
+                        let type_node_name = format!("{}:{}", file_node_name, param_type.type_name);
+                        let param_type_node = nodes.get(type_node_name.as_str());
+                        log::trace!(
+                            "type_node_name: {type_node_name}, param_type_node: {:?}",
+                            param_type_node
+                        );
+                        if let Some(param_type_node) = param_type_node {
+                            edges.push(Edge {
+                                r#type: EdgeType::References,
+                                from: func_node.clone(),
+                                to: param_type_node.clone(),
+                                import: Some(param_type.type_name.clone()),
+                                alias: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(edges)
+    }
+
+    fn parse_func_param_types(
         from_node_name: &String,
         param_type_name: &String,
-        import_edges: &Vec<Edge>,
-    ) -> Option<FuncParamType> {
-        // Skip the inline type definitions
-        // `f func (...) ...`
-        // `s struct { ... }`
-        // `iface interface { ... }`
-        if param_type_name.starts_with("func")
-            || param_type_name.starts_with("struct")
-            || param_type_name.starts_with("interface")
-        {
-            return None;
+        import_name_to_source_path: &HashMap<String, String>,
+    ) -> Vec<FuncParamType> {
+        let mut param_types: Vec<FuncParamType> = Vec::new();
+
+        for (import_name, source_path) in import_name_to_source_path {
+            log::trace!(
+                "imported_name: {import_name}, source_path: {:?}",
+                source_path
+            );
         }
 
-        // Do conversion:
-        // foo.Foo = > foo.Foo
-        // Foo => Foo
-        // *Foo => Foo
-        // []*Foo => Foo
-        // map[string]Foo => Foo
-        let parts: Vec<&str> = param_type_name
-            .rsplitn(2, |c| c == '*' || c == ']')
-            .collect();
-        let param_type = parts.first().unwrap_or(&"").trim();
+        let param_type_names = extract_ts_types(param_type_name.as_str(), true);
+        for param_type_name in param_type_names {
+            let type_parts: Vec<&str> = param_type_name.splitn(2, '.').collect();
+            let (module_name, type_name) = match type_parts.len() {
+                // no pacakge
+                1 => (None, type_parts[0].to_string()),
+                // package and type
+                2 => (Some(type_parts[0].to_string()), type_parts[1].to_string()),
+                _ => unreachable!(),
+            };
 
-        let type_parts: Vec<&str> = param_type.splitn(2, '.').collect();
-        let (package_name, type_name) = match type_parts.len() {
-            // no pacakge
-            1 => (None, type_parts[0].to_string()),
-            // package and type
-            2 => (Some(type_parts[0].to_string()), type_parts[1].to_string()),
-            _ => unreachable!(),
-        };
-
-        let mut real_package_name: Option<String> = None;
-        // Find the target package name that the type belongs to.
-        if let Some(package_name) = &package_name {
-            for rel in import_edges {
-                if let Some(import) = &rel.import {
-                    if import == package_name {
-                        real_package_name = Some(rel.to.name.clone());
-                        break;
-                    }
+            let mut source_node_name: Option<String> = None;
+            if let Some(module_name) = &module_name {
+                // Find the target module name that the type belongs to.
+                if let Some(file_node_name) = import_name_to_source_path.get(module_name) {
+                    source_node_name = Some(file_node_name.clone());
                 }
-                if let Some(alias) = &rel.alias {
-                    if alias == package_name {
-                        real_package_name = Some(rel.to.name.clone());
-                        break;
-                    }
+                // If the module name has not been imported, let the corresponding node name be None.
+            } else {
+                // Otherwise, the type might has been directly imported.
+                if let Some(file_node_name) = import_name_to_source_path.get(&type_name) {
+                    source_node_name = Some(file_node_name.clone());
+                } else {
+                    // Finally, the type might be defined in the same file.
+                    source_node_name = Some(from_node_name.clone());
                 }
             }
 
-            // If the package name is not found, leave it as None.
-        } else {
-            // Otherwise, the type is defined in the same package as the current file.
-            let mut parent_dir_path = from_node_name.rsplitn(2, '/').nth(1).unwrap_or("");
-            if parent_dir_path.is_empty() {
-                parent_dir_path = ".";
+            log::trace!(
+                "module_name: {:?}, type_name: {type_name}, source_node_name: {:?}",
+                module_name,
+                source_node_name
+            );
+
+            // Save the types referenced by the currrent function/method.
+            param_types.push(FuncParamType {
+                type_name,
+                package_name: source_node_name,
+            });
+        }
+
+        param_types
+    }
+}
+
+/// Extract types from TypeScript type string
+///
+/// # Arguments
+/// * `type_str` - TypeScript type expression string
+/// * `exclude_builtin` - Whether to exclude builtin types like string, number, etc.
+///
+/// # Returns
+/// * Array of extracted type strings
+pub fn extract_ts_types(type_str: &str, exclude_builtin: bool) -> Vec<String> {
+    // Builtin types list
+    let builtin_types: HashSet<&str> = [
+        // Primitive types
+        "string",
+        "number",
+        "boolean",
+        "any",
+        "void",
+        "null",
+        "undefined",
+        "unknown",
+        "never",
+        "object",
+        "bigint",
+        "symbol",
+        "function",
+        // Composite types
+        "Map",
+        "Promise",
+        "Array",
+        "Record",
+        "Partial",
+    ]
+    .iter()
+    .cloned()
+    .collect();
+
+    // Compile regex pattern
+    let re = Regex::new(r"(^|[<,\s])([A-Za-z_][A-Za-z0-9_]*)(?:\[\])*(>|,|\s|$|&|\|)?")
+        .expect("Invalid regex pattern");
+
+    let mut result = Vec::new();
+    let mut found_types = HashSet::new();
+
+    for cap in re.captures_iter(type_str) {
+        if let Some(matched) = cap.get(2) {
+            let type_name = matched.as_str();
+
+            // Handle type name filtering logic
+            if (!exclude_builtin || !builtin_types.contains(type_name))
+                && !found_types.contains(type_name)
+            {
+                result.push(type_name.to_string());
+                found_types.insert(type_name);
             }
-            real_package_name = Some(parent_dir_path.to_string());
         }
+    }
 
-        if util::is_go_builtin_type(&type_name) {
-            return None;
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_ts_types() {
+        let test_cases = vec![
+            "X",
+            "X[]",
+            "X[][]",
+            "Map<string, X>",
+            "Promise<X>",
+            "Array<X>",
+            "Record<string, X>",
+            "Promise<Map<string, X>>",
+            "Partial<X>",
+            "X | Y",                        // 联合类型
+            "X & Y",                        // 交叉类型
+            "Person extends Human ? X : Y", // 条件类型
+        ];
+
+        for case in test_cases {
+            println!("类型字符串: {}", case);
+
+            // 提取所有类型
+            let all_types = extract_ts_types(case, false);
+            println!("所有类型: {:?}", all_types);
+
+            // 排除内置类型
+            let custom_types = extract_ts_types(case, true);
+            println!("自定义类型: {:?}", custom_types);
+
+            println!();
         }
-
-        // Save the types referenced by the currrent function/method.
-        return Some(FuncParamType {
-            type_name,
-            package_name: real_package_name,
-        });
     }
 }

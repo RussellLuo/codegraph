@@ -10,6 +10,7 @@ use tree_sitter_go;
 use super::common;
 use super::common::QueryPattern;
 use crate::util;
+use crate::Database;
 use crate::FuncParamType;
 use crate::{Edge, EdgeType, Language, Node, NodeType};
 
@@ -490,6 +491,77 @@ impl Parser {
         }
 
         Ok((nodes, edges, Some(func_param_types)))
+    }
+
+    pub fn resolve_func_param_type_edges(
+        &self,
+        nodes: &IndexMap<String, Node>,
+        func_param_types: &HashMap<String, Vec<FuncParamType>>,
+        db: &mut Database,
+    ) -> Result<Vec<Edge>, Box<dyn std::error::Error>> {
+        let mut edges: Vec<Edge> = Vec::new();
+
+        let mut pkg_types: IndexMap<String, HashSet<String>> = IndexMap::new();
+        for (func_name, param_types) in func_param_types {
+            for param_type in param_types {
+                if let Some(package_name) = &param_type.package_name {
+                    pkg_types
+                        .entry(package_name.clone())
+                        .or_insert_with(HashSet::new)
+                        .insert(param_type.type_name.clone());
+                };
+            }
+        }
+
+        let mut pkgtype_to_node = IndexMap::new(); // "{pkg_name}:{type_name}" => type_node
+        for (pkg_name, type_names) in pkg_types {
+            let quoted_type_names: Vec<String> = type_names
+                .iter()
+                .map(|s| format!("\"{}\"", s.to_lowercase()))
+                .collect();
+            let type_names_str = format!("[{}]", quoted_type_names.join(", "));
+            let stmt = format!(
+                r#"
+MATCH (pkg {{ name: "{}" }})
+MATCH (pkg)-[:CONTAINS*2]->(typ)
+WHERE typ.short_name IN {}
+RETURN typ;
+                "#,
+                pkg_name, type_names_str,
+            );
+            log::trace!("Query Stmt: {:}", stmt);
+            let nodes = db.query_nodes(stmt.as_str())?;
+
+            for node in &nodes {
+                pkgtype_to_node.insert(format!("{}:{}", pkg_name, node.short_name()), node.clone());
+            }
+        }
+
+        for (func_name, param_types) in func_param_types {
+            let func_node = nodes.get(func_name);
+
+            for param_type in param_types {
+                if let Some(package_name) = &param_type.package_name {
+                    let mut type_node = pkgtype_to_node.get(&format!(
+                        "{}:{}",
+                        package_name,
+                        param_type.type_name.to_lowercase()
+                    ));
+                    if let (Some(func_node), Some(type_node)) = (func_node, type_node) {
+                        let rel = Edge {
+                            r#type: EdgeType::References,
+                            from: func_node.clone(),
+                            to: type_node.clone(),
+                            import: None,
+                            alias: None,
+                        };
+                        edges.push(rel);
+                    }
+                }
+            }
+        }
+
+        Ok(edges)
     }
 
     fn parse_func_param_type(

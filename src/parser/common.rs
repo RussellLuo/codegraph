@@ -15,6 +15,7 @@ pub enum QueryPattern {
 }
 
 /// A pending import relationship that needs to be resolved as an edge.
+#[derive(Debug, Clone)]
 pub struct PendingImport {
     pub language: Language,
     // The path of the source (imported) module
@@ -23,6 +24,18 @@ pub struct PendingImport {
     // - TypeScript: Some<"export default"> if the default export is imported
     pub symbol: Option<String>,
     pub alias: Option<String>,
+}
+
+impl PendingImport {
+    pub fn import_name(&self) -> String {
+        if let Some(alias) = &self.alias {
+            alias.clone()
+        } else if let Some(symbol) = &self.symbol {
+            symbol.clone()
+        } else {
+            unreachable!()
+        }
+    }
 }
 
 pub fn parse_simple_interface(
