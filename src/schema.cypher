@@ -53,6 +53,17 @@ CREATE NODE TABLE IF NOT EXISTS Function (
     end_line UINT32,
     PRIMARY KEY(name)
 );
+CREATE NODE TABLE IF NOT EXISTS OtherType (
+    name STRING,
+    type STRING,
+    short_name STRING,
+    language STRING,
+    code STRING,
+    skeleton_code STRING,
+    start_line UINT32,
+    end_line UINT32,
+    PRIMARY KEY(name)
+);
 CREATE NODE TABLE IF NOT EXISTS Variable (
     name STRING,
     type STRING,
@@ -71,6 +82,7 @@ CREATE REL TABLE IF NOT EXISTS CONTAINS (
     From File To Interface,
     From File To Class,
     From File To Function,
+    From File To OtherType,
     From File To Variable,
     From Interface To Function,
     From Class To Function,
@@ -82,6 +94,7 @@ CREATE REL TABLE IF NOT EXISTS IMPORTS (
     From File To Interface,
     From File To Class,
     From File To Function,
+    From File To OtherType,
     From File To Variable,
     From File To Unparsed,
     type STRING,
@@ -97,15 +110,18 @@ CREATE REL TABLE IF NOT EXISTS REFERENCES (
     From Class To Interface,
     From Class To Class,
     From Class To Function,
+    From Class To OtherType,
     From Class To Variable,
     From Class To Unparsed,
     From Function To Interface,
     From Function To Class,
     From Function To Function,
+    From Function To OtherType,
     From Function To Variable,
     From Function To Unparsed,
     From Variable To Class,
     From Variable To Function,
+    From Variable To OtherType,
     From Variable To Variable,
     From Variable To Unparsed,
     type STRING

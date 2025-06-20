@@ -677,7 +677,10 @@ mod tests {
                                 "main.ts:fetchUserData",
                                 "main.ts:greetUser",
                                 "types.ts",
+                                "types.ts:Callback",
+                                "types.ts:TaskStatus",
                                 "types.ts:User",
+                                "types.ts:UserID",
                                 "types.ts:UserService"
                             ],
                         );
@@ -688,10 +691,17 @@ mod tests {
                                 "-[contains]->types.ts",
                                 "main.ts-[contains]->main.ts:fetchUserData",
                                 "main.ts-[contains]->main.ts:greetUser",
+                                "main.ts-[imports]->types.ts:Callback",
+                                "main.ts-[imports]->types.ts:TaskStatus",
                                 "main.ts-[imports]->types.ts:User",
+                                "main.ts-[imports]->types.ts:UserID",
                                 "main.ts-[imports]->types.ts:UserService",
+                                "main.ts:fetchUserData-[references]->types.ts:UserID",
                                 "main.ts:greetUser-[references]->types.ts:User",
+                                "types.ts-[contains]->types.ts:Callback",
+                                "types.ts-[contains]->types.ts:TaskStatus",
                                 "types.ts-[contains]->types.ts:User",
+                                "types.ts-[contains]->types.ts:UserID",
                                 "types.ts-[contains]->types.ts:UserService"
                             ],
                         );

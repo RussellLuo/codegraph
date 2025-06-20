@@ -9,7 +9,8 @@ export const enum NodeType {
   File = 'File',
   Interface = 'Interface',
   Class = 'Class',
-  Function = 'Function'
+  Function = 'Function',
+  OtherType = 'OtherType'
 }
 export const enum EdgeType {
   Contains = 'Contains',

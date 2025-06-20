@@ -8,18 +8,20 @@ use strum_macros;
     Debug, Clone, PartialEq, Eq, strum_macros::EnumString, strum_macros::Display, serde::Serialize,
 )]
 pub enum NodeType {
-    #[strum(serialize = "unparsed")]
+    #[strum(serialize = "Unparsed")]
     Unparsed,
-    #[strum(serialize = "directory")]
+    #[strum(serialize = "Directory")]
     Directory,
-    #[strum(serialize = "file")]
+    #[strum(serialize = "File")]
     File,
-    #[strum(serialize = "interface")]
-    Interface,
-    #[strum(serialize = "class")]
-    Class,
-    #[strum(serialize = "function")]
-    Function,
+    #[strum(serialize = "Interface")]
+    Interface, // interface, trait, etc
+    #[strum(serialize = "Class")]
+    Class, // class, struct
+    #[strum(serialize = "Function")]
+    Function, // function, method
+    #[strum(serialize = "OtherType")]
+    OtherType, // enum, type alias, etc
 }
 
 #[derive(Debug, Clone, strum_macros::Display, strum_macros::EnumString, serde::Serialize)]
@@ -204,7 +206,7 @@ impl Node {
                     serde_json::Value::String(self.skeleton_code.clone()),
                 );
             }
-            NodeType::Interface | NodeType::Class | NodeType::Function => {
+            NodeType::Interface | NodeType::Class | NodeType::Function | NodeType::OtherType => {
                 dict.insert(
                     "language".to_string(),
                     serde_json::Value::String(self.language.to_string()),
@@ -356,8 +358,8 @@ impl Edge {
     pub fn from_to(&self) -> String {
         format!(
             "{}_{}",
-            self.from.r#type.to_string().to_lowercase(),
-            self.to.r#type.to_string().to_lowercase()
+            self.from.r#type.to_string(),
+            self.to.r#type.to_string(),
         )
     }
 }

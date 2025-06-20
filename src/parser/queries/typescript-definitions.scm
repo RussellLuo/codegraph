@@ -1,4 +1,4 @@
-; Pattern 0: Import Declarations
+; Pattern 0: Import Statements
 (import_statement
   (import_clause [
     (
@@ -60,3 +60,14 @@
   )
   body: (statement_block) @definition.function.body
 ) @definition.function
+
+; Pattern 4: Enum Declarations
+(enum_declaration
+  name: (identifier) @definition.enum.name
+  body: (enum_body)
+) @definition.enum
+
+; Pattern 5: Type Alias Declarations
+(type_alias_declaration
+  name: (type_identifier) @definition.type_alias.name
+) @definition.type_alias

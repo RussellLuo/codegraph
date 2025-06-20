@@ -10,6 +10,7 @@ pub enum NodeType {
     Interface,
     Class,
     Function,
+    OtherType,
 }
 
 impl From<codegraph::NodeType> for NodeType {
@@ -21,6 +22,7 @@ impl From<codegraph::NodeType> for NodeType {
             codegraph::NodeType::Interface => NodeType::Interface,
             codegraph::NodeType::Class => NodeType::Class,
             codegraph::NodeType::Function => NodeType::Function,
+            codegraph::NodeType::OtherType => NodeType::OtherType,
         }
     }
 }
@@ -34,6 +36,7 @@ impl Into<codegraph::NodeType> for NodeType {
             NodeType::Interface => codegraph::NodeType::Interface,
             NodeType::Class => codegraph::NodeType::Class,
             NodeType::Function => codegraph::NodeType::Function,
+            NodeType::OtherType => codegraph::NodeType::OtherType,
         }
     }
 }

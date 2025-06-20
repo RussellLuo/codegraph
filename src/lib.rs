@@ -256,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn test_index() {
+    fn test_index_go() {
         init();
 
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
@@ -282,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn test_upsert_file() {
+    fn test_upsert_file_go() {
         init();
 
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
@@ -430,6 +430,75 @@ mod tests {
         let _ = duct::cmd!("cp", original_file_path, types_go_path.clone())
             .read()
             .unwrap();
+    }
+
+    #[test]
+    fn test_index_typescript() {
+        init();
+
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let repo_path = PathBuf::from(manifest_dir)
+            .join("examples")
+            .join("typescript");
+        let db_path = repo_path.join("kuzu_db");
+
+        let config = Config::default().ignore_patterns(vec!["*".to_string(), "!*.ts".to_string()]);
+        let mut graph = CodeGraph::new(db_path, repo_path.clone(), config);
+
+        graph.clean(true).unwrap();
+        graph.index(repo_path.clone(), true).unwrap();
+
+        let final_nodes = graph.query_nodes("MATCH (n) RETURN n".to_string()).unwrap();
+        let final_edges = graph
+            .query_edges("MATCH (a)-[e]->(b) RETURN a.name, b.name, e".to_string())
+            .unwrap();
+        let mut node_strings: Vec<_> = final_nodes.into_iter().map(|n| n.name).collect();
+        let mut edge_strings: Vec<_> = final_edges
+            .into_iter()
+            .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
+            .collect();
+
+        node_strings.sort();
+        edge_strings.sort();
+
+        assert_eq!(
+            node_strings,
+            [
+                ".",
+                "main.ts",
+                "main.ts:fetchUserData",
+                "main.ts:greetUser",
+                "types.ts",
+                "types.ts:Callback",
+                "types.ts:TaskStatus",
+                "types.ts:User",
+                "types.ts:UserID",
+                "types.ts:UserService"
+            ],
+        );
+        assert_eq!(
+            edge_strings,
+            [
+                ".-[contains]->main.ts",
+                ".-[contains]->types.ts",
+                "main.ts-[contains]->main.ts:fetchUserData",
+                "main.ts-[contains]->main.ts:greetUser",
+                "main.ts-[imports]->types.ts:Callback",
+                "main.ts-[imports]->types.ts:TaskStatus",
+                "main.ts-[imports]->types.ts:User",
+                "main.ts-[imports]->types.ts:UserID",
+                "main.ts-[imports]->types.ts:UserService",
+                "main.ts:fetchUserData-[references]->types.ts:UserID",
+                "main.ts:greetUser-[references]->types.ts:User",
+                "types.ts-[contains]->types.ts:Callback",
+                "types.ts-[contains]->types.ts:TaskStatus",
+                "types.ts-[contains]->types.ts:User",
+                "types.ts-[contains]->types.ts:UserID",
+                "types.ts-[contains]->types.ts:UserService"
+            ],
+        );
+
+        graph.clean(true).unwrap();
     }
 
     #[test]

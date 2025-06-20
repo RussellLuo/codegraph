@@ -3,12 +3,12 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
+use strum_macros;
 use tree_sitter;
 use tree_sitter::StreamingIterator;
 use tree_sitter_go;
 
 use super::common;
-use super::common::QueryPattern;
 use crate::util;
 use crate::Database;
 use crate::FuncParamType;
@@ -16,6 +16,18 @@ use crate::{Edge, EdgeType, Language, Node, NodeType};
 
 /// The tree-sitter definition query source for Go.
 pub const GO_DEFINITIONS_QUERY_SOURCE: &str = include_str!("queries/go-definitions.scm");
+
+/// Tree-sitter query patterns.
+///
+/// Note that the order of these variants must match the order of the patterns in the query source file.
+#[derive(Debug, Clone, PartialEq, Eq, strum_macros::FromRepr)]
+enum QueryPattern {
+    Import,
+    Interface,
+    Class,
+    Function,
+    Method,
+}
 
 pub struct Parser {
     repo_path: PathBuf,

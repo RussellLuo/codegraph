@@ -291,11 +291,6 @@ impl Database {
 
         let temp_dir = tempfile::tempdir()?;
         let temp_dir_path = temp_dir.path();
-        log::debug!(
-            "save {} nodes in temp_dir: {:?}",
-            nodes.len(),
-            temp_dir_path
-        );
         log::info!("bulk-insert {} nodes", nodes.len());
         self.write_nodes_to_json(nodes, &temp_dir_path)?;
 
@@ -309,18 +304,10 @@ impl Database {
 
                 if let Some(extension) = file_path.extension() {
                     if extension == "json" {
-                        let file_stem = file_path
+                        let table_name = file_path
                             .file_stem()
                             .and_then(|s| s.to_str())
                             .ok_or("Invalid file name")?;
-
-                        // Capitalize first letter of filename for table name
-                        let table_name = format!(
-                            "{}{}",
-                            file_stem.chars().next().unwrap().to_uppercase(),
-                            &file_stem[1..]
-                        );
-
                         let query = format!(r#"COPY {} FROM {:?}"#, table_name, file_path);
                         conn.query(query.as_str())?;
                     }
@@ -341,11 +328,11 @@ impl Database {
 
         let temp_dir = tempfile::tempdir()?;
         let temp_dir_path = temp_dir.path();
-        log::debug!(
-            "save {} nodes in temp_dir: {:?}",
-            nodes.len(),
-            temp_dir_path
-        );
+        if log::log_enabled!(log::Level::Trace) {
+            for node in nodes {
+                log::trace!("node: {:?}", node);
+            }
+        }
         log::info!("bulk-insert {} nodes", nodes.len());
         self.write_nodes_to_csv(nodes, &temp_dir_path)?;
 
@@ -359,23 +346,17 @@ impl Database {
 
                 if let Some(extension) = file_path.extension() {
                     if extension == "csv" {
-                        let file_stem = file_path
+                        let table_name = file_path
                             .file_stem()
                             .and_then(|s| s.to_str())
                             .ok_or("Invalid file name")?;
-
-                        // Capitalize first letter of filename for table name
-                        let table_name = format!(
-                            "{}{}",
-                            file_stem.chars().next().unwrap().to_uppercase(),
-                            &file_stem[1..]
-                        );
 
                         // Quoted newlines are not supported in parallel CSV reader, thus we have to specify PARALLEL=FALSE in the options.
                         let query = format!(
                             r#"COPY {} FROM {:?} (HEADER=true, PARALLEL=false)"#,
                             table_name, file_path
                         );
+                        log::trace!("bulk-insert query: {query}");
                         conn.query(query.as_str())?;
                     }
                 }
