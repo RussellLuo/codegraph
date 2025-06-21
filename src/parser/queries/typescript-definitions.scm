@@ -30,7 +30,7 @@
 ; Pattern 2: Class Declarations
 (class_declaration
   name: (type_identifier) @definition.class.name
-  body: (class_body)
+  body: (class_body) @definition.class.body
 ) @definition.class
 
 ; Pattern 3: Function Declarations

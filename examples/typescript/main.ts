@@ -21,7 +21,7 @@ function getProp<T, K extends keyof T>(obj: T, key: K): T[K] {
 }
 
 // 异步函数
-async function fetchUserData(userId: UserID): Promise<User | null> {
+async function fetchUserData(userId: UserID, svc: UserService): Promise<User | null> {
     try {
         const response = await axios.get(`https://api.example.com/users/${userId}`);
         return response.data as User;

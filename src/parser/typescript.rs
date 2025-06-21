@@ -204,14 +204,60 @@ impl Parser {
                     }
 
                     QueryPattern::Class => {
-                        let current_node = common::parse_simple_class(
-                            &query,
-                            &mat,
-                            &self.repo_path,
-                            file_node,
-                            file_path,
-                            &source_code,
-                        );
+                        let mut current_node: Option<Node> = None;
+                        let mut current_tree_sitter_main_node: Option<tree_sitter::Node> = None;
+
+                        for capture in mat.captures {
+                            let capture_name = query.capture_names()[capture.index as usize];
+                            let capture_node_text: String = capture
+                                .node
+                                .utf8_text(&source_code)
+                                .unwrap_or("")
+                                .to_string();
+                            common::log_capture(&capture, capture_name, &capture_node_text);
+
+                            match capture_name {
+                                "definition.class" => {
+                                    current_node = Some(Node {
+                                        name: "".to_string(), // fill in later
+                                        r#type: NodeType::Class,
+                                        language: file_node.language.clone(),
+                                        start_line: capture.node.start_position().row,
+                                        end_line: capture.node.end_position().row,
+                                        code: capture_node_text,
+                                        skeleton_code: String::new(),
+                                    });
+                                    current_tree_sitter_main_node = Some(capture.node);
+                                }
+                                "definition.class.name" => {
+                                    if let Some(curr_node) = &mut current_node {
+                                        curr_node.name = format!(
+                                            "{}:{}",
+                                            file_node.name.clone(),
+                                            capture_node_text
+                                        );
+                                    }
+                                }
+                                "definition.class.body" => {
+                                    if let Some(current_tree_sitter_main_node) =
+                                        current_tree_sitter_main_node
+                                    {
+                                        let start_byte = current_tree_sitter_main_node.start_byte();
+                                        let body_start_byte = capture.node.start_byte();
+                                        if let Some(curr_node) = &mut current_node {
+                                            // Skip the body and keep only the signature.
+                                            curr_node.skeleton_code = String::from_utf8_lossy(
+                                                &source_code[start_byte..body_start_byte],
+                                            )
+                                            .to_string()
+                                                + "{ ... }";
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+
                         if let Some(curr_node) = current_node {
                             nodes.insert(curr_node.name.clone(), curr_node.clone());
                             edges.push(Edge {
@@ -255,10 +301,7 @@ impl Parser {
                                     if let Some(curr_node) = &mut current_node {
                                         curr_node.name = format!(
                                             "{}:{}",
-                                            Path::new(file_path)
-                                                .strip_prefix(&self.repo_path)
-                                                .unwrap_or_else(|_| Path::new(file_path))
-                                                .to_string_lossy(),
+                                            file_node.name.clone(),
                                             capture_node_text
                                         );
                                     }
@@ -278,7 +321,7 @@ impl Parser {
                                                 &source_code[start_byte..body_start_byte],
                                             )
                                             .to_string()
-                                                + "{\n...\n}";
+                                                + "{ ... }";
                                         }
                                     }
                                 }
@@ -371,7 +414,7 @@ impl Parser {
                                                 &source_code[start_byte..body_start_byte],
                                             )
                                             .to_string()
-                                                + "{\n...\n}";
+                                                + "{ ... }";
                                         }
                                     }
                                 }

@@ -161,6 +161,8 @@ DELETE e;
         file_path: String,
         line: usize,
     ) -> Result<Vec<Snippet>, Box<dyn std::error::Error>> {
+        // TODO: Needs improvements for better maintenance.
+
         let mut snippets: Vec<Snippet> = Vec::new();
 
         // Make file_path a relative path to the repo_path.
@@ -176,42 +178,91 @@ MATCH (file)-[:CONTAINS*1..2]->(func)
 MATCH (func)-[:REFERENCES]->(typ)
 WHERE func.start_line < {} AND func.end_line > {}
 OPTIONAL MATCH (typ)-[r:CONTAINS]->(meth)
-RETURN typ.name, typ.start_line, typ.end_line, typ.code, COLLECT(meth.skeleton_code) AS methods;
+RETURN typ.language, typ.type, typ.name, typ.start_line, typ.end_line, typ.code, typ.skeleton_code, COLLECT(meth.skeleton_code) AS methods;
         "#,
             file_path, line, line
         );
         if let Some(result) = self.db.query(stmt.as_str())? {
             for row in result {
-                let path = match &row[0] {
+                let language = match &row[0] {
+                    kuzu::Value::String(lang) => lang.parse().unwrap_or(Language::Text),
+                    _ => Language::Text,
+                };
+                let type_type = match &row[1] {
+                    kuzu::Value::String(type_str) => type_str.parse().unwrap_or(NodeType::Unparsed),
+                    _ => NodeType::Unparsed,
+                };
+                let path = match &row[2] {
                     kuzu::Value::String(path) => {
                         let parts: Vec<&str> = path.split(':').collect();
                         parts[0].clone().to_string()
                     }
                     _ => "".to_string(),
                 };
-                let start_line = match &row[1] {
+                let start_line = match &row[3] {
                     kuzu::Value::UInt32(line) => *line as usize,
                     _ => 0,
                 };
-                let end_line = match &row[2] {
+                let end_line = match &row[4] {
                     kuzu::Value::UInt32(line) => *line as usize,
                     _ => 0,
                 };
 
                 let mut content = String::new();
-                match &row[3] {
-                    kuzu::Value::String(type_code) => {
-                        content.push_str(type_code.as_str());
+                match language {
+                    Language::Go => {
+                        match &row[5] {
+                            kuzu::Value::String(type_code) => {
+                                content.push_str(type_code.as_str());
+                            }
+                            _ => {}
+                        }
+                        match &row[7] {
+                            kuzu::Value::List(_, methods) => {
+                                for meth in methods {
+                                    match meth {
+                                        kuzu::Value::String(meth_skeleton_code) => {
+                                            content.push_str("\n\n");
+                                            content.push_str(meth_skeleton_code.as_str());
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
                     }
-                    _ => {}
-                }
-                match &row[4] {
-                    kuzu::Value::List(_, methods) => {
-                        for meth in methods {
-                            match meth {
-                                kuzu::Value::String(meth_skeleton_code) => {
-                                    content.push_str("\n\n");
-                                    content.push_str(meth_skeleton_code.as_str());
+                    Language::TypeScript => {
+                        if type_type == NodeType::Class {
+                            match &row[6] {
+                                kuzu::Value::String(type_skeleton_code) => {
+                                    content.push_str(
+                                        &type_skeleton_code
+                                            [0..type_skeleton_code.len() - "{ ... }".len()],
+                                    );
+                                    content.push_str("{");
+                                }
+                                _ => {}
+                            }
+                            match &row[7] {
+                                kuzu::Value::List(_, methods) => {
+                                    for meth in methods {
+                                        match meth {
+                                            kuzu::Value::String(meth_skeleton_code) => {
+                                                content.push_str("\n  ");
+                                                content.push_str(meth_skeleton_code.as_str());
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                            content.push_str("\n}");
+                        } else {
+                            match &row[5] {
+                                kuzu::Value::String(type_code) => {
+                                    content.push_str(type_code.as_str());
                                 }
                                 _ => {}
                             }
@@ -502,6 +553,7 @@ mod tests {
                 "main.ts-[imports]->types.ts:UserID",
                 "main.ts-[imports]->types.ts:UserService",
                 "main.ts:fetchUserData-[references]->types.ts:UserID",
+                "main.ts:fetchUserData-[references]->types.ts:UserService",
                 "main.ts:greetUser-[references]->types.ts:User",
                 "types.ts-[contains]->types.ts:Callback",
                 "types.ts-[contains]->types.ts:TaskStatus",

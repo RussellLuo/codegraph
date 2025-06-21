@@ -682,7 +682,10 @@ mod tests {
                                 "types.ts:TaskStatus",
                                 "types.ts:User",
                                 "types.ts:UserID",
-                                "types.ts:UserService"
+                                "types.ts:UserService",
+                                "types.ts:UserService.constructor",
+                                "types.ts:UserService.filterUsers",
+                                "types.ts:UserService.getUser"
                             ],
                         );
                         assert_eq!(
@@ -698,12 +701,17 @@ mod tests {
                                 "main.ts-[imports]->types.ts:UserID",
                                 "main.ts-[imports]->types.ts:UserService",
                                 "main.ts:fetchUserData-[references]->types.ts:UserID",
+                                "main.ts:fetchUserData-[references]->types.ts:UserService",
                                 "main.ts:greetUser-[references]->types.ts:User",
                                 "types.ts-[contains]->types.ts:Callback",
                                 "types.ts-[contains]->types.ts:TaskStatus",
                                 "types.ts-[contains]->types.ts:User",
                                 "types.ts-[contains]->types.ts:UserID",
-                                "types.ts-[contains]->types.ts:UserService"
+                                "types.ts-[contains]->types.ts:UserService",
+                                "types.ts:UserService-[contains]->types.ts:UserService.constructor",
+                                "types.ts:UserService-[contains]->types.ts:UserService.filterUsers",
+                                "types.ts:UserService-[contains]->types.ts:UserService.getUser",
+                                "types.ts:UserService.getUser-[references]->types.ts:UserID"
                             ],
                         );
                     }
