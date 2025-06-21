@@ -86,6 +86,7 @@ CREATE REL TABLE IF NOT EXISTS CONTAINS (
     From File To Variable,
     From Interface To Function,
     From Class To Function,
+    From OtherType To Function,
     type STRING
 );
 CREATE REL TABLE IF NOT EXISTS IMPORTS (

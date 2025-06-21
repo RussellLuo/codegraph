@@ -301,7 +301,7 @@ impl Parser {
         // Add custom ignore patterns
         for pattern in &self.config.ignore_patterns {
             // FIXME: this seems to not work as expected, need to investigate further.
-            println!("PATTERN: {pattern}");
+            //println!("PATTERN: {pattern}");
             builder.add_ignore(pattern);
         }
 
