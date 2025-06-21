@@ -108,6 +108,8 @@ pub struct Parser {
     go_parser: go::Parser,
     typescript_parser: typescript::Parser,
     python_parser: python::Parser,
+
+    parsing_file: bool, // Flag to indicate if a file is currently being parsed. Defaults to false.
 }
 
 impl Parser {
@@ -123,6 +125,8 @@ impl Parser {
             go_parser: go::Parser::new(repo_path.clone()),
             typescript_parser: typescript::Parser::new(repo_path.clone()),
             python_parser: python::Parser::new(repo_path.clone()),
+
+            parsing_file: false,
         }
     }
 
@@ -141,6 +145,9 @@ impl Parser {
         if path.is_dir() {
             self.traverse_directory(&path)?;
         } else if path.is_file() {
+            // We are currently parsing a single file.
+            self.parsing_file = true;
+
             let (file_node, nodes, edges, pending_imports, func_param_types) =
                 self.parse_file(&path)?;
 
@@ -225,11 +232,20 @@ impl Parser {
                     edges.extend(go_edges);
                 }
                 Language::TypeScript => {
-                    let ts_edges = self.typescript_parser.resolve_func_param_type_edges(
-                        &self.nodes,
-                        &func_param_types,
-                        db,
-                    )?;
+                    let ts_edges = if self.parsing_file {
+                        self.typescript_parser
+                            .resolve_func_param_type_edges_from_db(
+                                &self.nodes,
+                                &func_param_types,
+                                db,
+                            )?
+                    } else {
+                        self.typescript_parser.resolve_func_param_type_edges(
+                            &self.nodes,
+                            &func_param_types,
+                            db,
+                        )?
+                    };
                     edges.extend(ts_edges);
                 }
                 _ => {}

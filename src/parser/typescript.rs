@@ -714,6 +714,7 @@ impl Parser {
         Ok(edges)
     }
 
+    // Mainly used when indexing all the repo (for performance reasons).
     pub fn resolve_func_param_type_edges(
         &self,
         nodes: &IndexMap<String, Node>,
@@ -738,10 +739,84 @@ impl Parser {
                                 r#type: EdgeType::References,
                                 from: func_node.clone(),
                                 to: param_type_node.clone(),
-                                import: Some(param_type.type_name.clone()),
+                                import: None,
                                 alias: None,
                             });
                         }
+                    }
+                }
+            }
+        }
+
+        Ok(edges)
+    }
+
+    // Mainly used when indexing a single file, where type nodes are not available in the current file.
+    pub fn resolve_func_param_type_edges_from_db(
+        &self,
+        nodes: &IndexMap<String, Node>,
+        func_param_types: &HashMap<String, Vec<FuncParamType>>,
+        db: &mut Database,
+    ) -> Result<Vec<Edge>, Box<dyn std::error::Error>> {
+        let mut edges: Vec<Edge> = Vec::new();
+
+        let mut file_types: IndexMap<String, HashSet<String>> = IndexMap::new();
+        for (func_node_name, param_types) in func_param_types {
+            for param_type in param_types {
+                if let Some(file_node_name) = &param_type.package_name {
+                    file_types
+                        .entry(file_node_name.clone())
+                        .or_insert_with(HashSet::new)
+                        .insert(param_type.type_name.clone());
+                };
+            }
+        }
+
+        let mut filetype_to_node = IndexMap::new(); // "{file_node_name}:{type_name}" => type_node
+        for (file_node_name, type_names) in file_types {
+            let quoted_type_names: Vec<String> = type_names
+                .iter()
+                .map(|s| format!("\"{}\"", s.to_lowercase()))
+                .collect();
+            let type_names_str = format!("[{}]", quoted_type_names.join(", "));
+            let stmt = format!(
+                r#"
+MATCH (file {{ name: "{}" }})
+MATCH (file)-[:CONTAINS]->(typ)
+WHERE typ.short_name IN {}
+RETURN typ;
+                "#,
+                file_node_name, type_names_str,
+            );
+            log::trace!("Query Stmt: {:}", stmt);
+            let type_nodes = db.query_nodes(stmt.as_str())?;
+
+            for node in &type_nodes {
+                filetype_to_node.insert(
+                    format!("{}:{}", file_node_name, node.short_name()),
+                    node.clone(),
+                );
+            }
+        }
+
+        for (func_node_name, param_types) in func_param_types {
+            let func_node = nodes.get(func_node_name);
+
+            for param_type in param_types {
+                if let Some(file_node_name) = &param_type.package_name {
+                    let mut param_type_node = filetype_to_node.get(&format!(
+                        "{}:{}",
+                        file_node_name,
+                        param_type.type_name.to_lowercase()
+                    ));
+                    if let (Some(func_node), Some(param_type_node)) = (func_node, param_type_node) {
+                        edges.push(Edge {
+                            r#type: EdgeType::References,
+                            from: func_node.clone(),
+                            to: param_type_node.clone(),
+                            import: None,
+                            alias: None,
+                        });
                     }
                 }
             }
