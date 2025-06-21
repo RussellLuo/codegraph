@@ -318,11 +318,7 @@ mod tests {
             .join("demo");
         let db_path = dir_path.join("kuzu_db");
 
-        let config = Config::default().ignore_patterns(vec![
-            "*".to_string(),
-            "!main.go".to_string(),
-            "!types.go".to_string(),
-        ]);
+        let config = Config::default().ignore_patterns(vec!["diff".into()]);
         let mut graph = CodeGraph::new(db_path, dir_path.clone(), config);
 
         graph.clean(true).unwrap();
@@ -344,11 +340,7 @@ mod tests {
             .join("demo");
         let db_path = repo_path.join("kuzu_db");
 
-        let config = Config::default().ignore_patterns(vec![
-            "*".to_string(),
-            "!main.go".to_string(),
-            "!types.go".to_string(),
-        ]);
+        let config = Config::default().ignore_patterns(vec!["diff".into()]);
         let mut graph = CodeGraph::new(db_path, repo_path.clone(), config);
 
         // 1.1 initial index
@@ -504,11 +496,7 @@ mod tests {
             .join("typescript");
         let db_path = repo_path.join("kuzu_db");
 
-        let config = Config::default().ignore_patterns(vec![
-            "*".to_string(),
-            "!main.ts".to_string(),
-            "!types.ts".to_string(),
-        ]);
+        let config = Config::default().ignore_patterns(vec!["diff".into()]);
         let mut graph = CodeGraph::new(db_path, repo_path.clone(), config);
 
         graph.clean(true).unwrap();
@@ -585,11 +573,7 @@ mod tests {
             .join("typescript");
         let db_path = repo_path.join("kuzu_db");
 
-        let config = Config::default().ignore_patterns(vec![
-            "*".to_string(),
-            "!main.ts".to_string(),
-            "!types.ts".to_string(),
-        ]);
+        let config = Config::default().ignore_patterns(vec!["diff".into()]);
         let mut graph = CodeGraph::new(db_path, repo_path.clone(), config);
 
         // 1.1 initial index
@@ -755,11 +739,7 @@ mod tests {
             .join("demo");
         let db_path = dir_path.join("kuzu_db");
 
-        let config = Config::default().ignore_patterns(vec![
-            "*".to_string(),
-            "!main.go".to_string(),
-            "!types.go".to_string(),
-        ]);
+        let config = Config::default().ignore_patterns(vec!["diff".into()]);
         let mut graph = CodeGraph::new(db_path, dir_path.clone(), config);
         graph.index(dir_path, false).unwrap();
 

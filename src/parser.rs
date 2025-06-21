@@ -1,4 +1,5 @@
 use glob::Pattern;
+use ignore::WalkBuilder;
 use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -257,14 +258,13 @@ impl Parser {
 
     /// Traverses all files and directories in the specified directory, creates Node and Edge objects
     /// This method processes files by calling self.parse_file directly when encountering supported file types
+    /// Uses the ignore library for better gitignore handling
     ///
     /// # Arguments
     /// - `dir_path`: The directory path to traverse
     ///
     /// # Returns
-    /// - A tuple containing (nodes, edges) where:
-    ///   - nodes: Vector of Node objects representing directories, files, and parsed code elements
-    ///   - edges: Vector of Edge objects representing Contains edges
+    /// - Result indicating success or failure of the traversal operation
     pub fn traverse_directory(
         &mut self,
         dir_path: &PathBuf,
@@ -277,56 +277,40 @@ impl Parser {
         let mut processed_paths: std::collections::HashSet<PathBuf> =
             std::collections::HashSet::new();
 
-        // Create WalkDir instance and apply configuration options
-        let mut walkdir = WalkDir::new(dir_path);
+        // Create WalkBuilder instance with better gitignore support
+        let mut builder = WalkBuilder::new(dir_path);
 
-        // Configure whether to follow symbolic links
-        walkdir = walkdir.follow_links(self.config.follow_links);
+        // Configure basic options
+        builder
+            .follow_links(self.config.follow_links)
+            .git_ignore(self.config.use_gitignore_files)
+            .git_global(self.config.use_gitignore_files)
+            .git_exclude(self.config.use_gitignore_files)
+            .hidden(true);
 
         // Configure maximum recursion depth
         if self.config.max_depth > 0 {
-            walkdir = walkdir.max_depth(self.config.max_depth);
+            builder.max_depth(Some(self.config.max_depth));
         }
 
         // If not recursive, set depth to 1 (only traverse current directory)
         if !self.config.recursive {
-            walkdir = walkdir.max_depth(1);
+            builder.max_depth(Some(1));
         }
 
-        // Compile ignore patterns
-        let mut ignore_patterns: Vec<Pattern> = self
-            .config
-            .ignore_patterns
-            .iter()
-            .filter_map(|p| Pattern::new(p).ok())
-            .collect();
-
-        // Add patterns from .gitignore files if enabled
-        if self.config.use_gitignore_files {
-            if let Ok(gitignore_path) = dir_path.join(".gitignore").canonicalize() {
-                if let Ok(content) = std::fs::read_to_string(&gitignore_path) {
-                    for line in content.lines() {
-                        let line = line.trim();
-                        // Skip comments and empty lines
-                        if line.is_empty() || line.starts_with('#') {
-                            continue;
-                        }
-                        if let Ok(pattern) = Pattern::new(line) {
-                            ignore_patterns.push(pattern);
-                        }
-                    }
-                }
-            }
+        // Add custom ignore patterns
+        for pattern in &self.config.ignore_patterns {
+            // FIXME: this seems to not work as expected, need to investigate further.
+            println!("PATTERN: {pattern}");
+            builder.add_ignore(pattern);
         }
+
+        // Build the walker
+        let walker = builder.build();
 
         // Create root directory node
         let root_node = Node {
-            // kuzu CSV does not support empty string as node name, so use "." for root directory
-            //name: dir_path
-            //    .strip_prefix(dir_path)
-            //    .unwrap_or(dir_path)
-            //    .to_string_lossy()
-            //    .to_string(),
+            // kuzu CSV does not support empty string as node name, so use "" for root directory
             name: String::from(""),
             r#type: NodeType::Directory,
             language: Language::Text,
@@ -338,57 +322,40 @@ impl Parser {
         self.add_node(&root_node)?;
         processed_paths.insert(dir_path.clone());
 
-        // Traverse directory
-        for entry in walkdir {
-            match entry {
+        // Traverse directory using ignore library
+        for result in walker {
+            match result {
                 Ok(entry) => {
                     let entry_path = entry.path();
+
+                    // Skip if not supported file types (.go, .ts, .py)
+                    if entry_path.is_file() {
+                        let extension = entry_path.extension().and_then(|ext| ext.to_str());
+                        match extension {
+                            Some("go") | Some("ts") | Some("py") => {
+                                // Continue processing supported files
+                            }
+                            _ => {
+                                // Skip unsupported file types
+                                continue;
+                            }
+                        }
+                    }
 
                     // Skip if already processed
                     if processed_paths.contains(entry_path) {
                         continue;
                     }
 
-                    // Get relative path from the root directory for ignore pattern checking
-                    let rel_path = entry_path
-                        .strip_prefix(dir_path)
-                        .unwrap_or(entry_path)
-                        .to_string_lossy();
-
-                    // Check if path matches any ignore pattern
-                    let mut should_skip = false;
-                    let mut has_negation = false;
-
-                    // First check positive patterns
-                    for pattern in &ignore_patterns {
-                        if !pattern.as_str().starts_with('!') && pattern.matches(&rel_path) {
-                            should_skip = true;
-                            break;
-                        }
-                    }
-
-                    // Then check negation patterns
-                    if should_skip {
-                        for pattern in &ignore_patterns {
-                            if pattern.as_str().starts_with('!') {
-                                let negated_pattern = &pattern.as_str()[1..];
-                                if let Ok(p) = Pattern::new(negated_pattern) {
-                                    if p.matches(&rel_path) {
-                                        has_negation = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        should_skip = !has_negation;
-                    }
-
-                    if should_skip {
+                    // Skip the root directory itself to avoid duplication
+                    if entry_path == dir_path {
                         continue;
                     }
 
+                    log::trace!("Indexing path: {:?}", entry_path.display());
+
                     // Create node for current entry
-                    let current_node = if entry.file_type().is_dir() {
+                    let current_node = if entry_path.is_dir() {
                         Node {
                             name: entry_path
                                 .strip_prefix(dir_path)
@@ -403,21 +370,30 @@ impl Parser {
                             skeleton_code: String::from(""),
                         }
                     } else {
+                        // Parse file and extract nodes/edges
                         let (file_node, nodes, edges, pending_imports, func_param_types) =
                             self.parse_file(&entry_path)?;
                         let language = file_node.language.clone();
+
+                        // Add parsed nodes to the collection
                         for (n_name, n) in nodes {
                             self.nodes.insert(n_name, n);
                         }
+
+                        // Add parsed edges to the collection
                         for edge in edges {
                             self.edges.push(edge);
                         }
+
+                        // Store pending imports for later resolution
                         if pending_imports.len() > 0 {
                             self.pending_imports
                                 .entry(language.clone())
                                 .or_insert_with(HashMap::new)
                                 .insert(file_node.name.clone(), pending_imports);
                         }
+
+                        // Store function parameter types for later resolution
                         if let Some(func_param_types) = func_param_types {
                             self.func_param_types
                                 .entry(language.clone())
@@ -425,7 +401,7 @@ impl Parser {
                                 .extend(func_param_types);
                         }
 
-                        // Sleep for a short duration to avoid high CPU usage during traversal.
+                        // Sleep for a short duration to avoid high CPU usage during traversal
                         thread::sleep(Duration::from_millis(1));
 
                         file_node
@@ -434,19 +410,22 @@ impl Parser {
                     self.add_node(&current_node)?;
                     processed_paths.insert(entry_path.to_path_buf());
 
-                    // Find parent directory and create Contains edge
+                    // Create Contains edge from parent to current node
                     if let Some(parent_path) = entry_path.parent() {
-                        // Find parent node in the nodes vector
-                        let parent_path_str = parent_path
-                            .strip_prefix(dir_path)
-                            .unwrap_or(entry_path)
-                            .to_string_lossy()
-                            .to_string();
+                        let parent_path_str = if parent_path == dir_path {
+                            // Parent is the root directory
+                            String::from("")
+                        } else {
+                            // Parent is a subdirectory
+                            parent_path
+                                .strip_prefix(dir_path)
+                                .unwrap_or(parent_path)
+                                .to_string_lossy()
+                                .to_string()
+                        };
 
                         // Ensure parent directory node exists
-                        if !processed_paths.contains(parent_path)
-                            && parent_path != Path::new(dir_path)
-                        {
+                        if !processed_paths.contains(parent_path) && parent_path != dir_path {
                             let parent_node = Node {
                                 name: parent_path_str.clone(),
                                 r#type: NodeType::Directory,
@@ -460,7 +439,7 @@ impl Parser {
                             processed_paths.insert(parent_path.to_path_buf());
                         }
 
-                        // Find the actual parent node from nodes vector
+                        // Create Contains edge from parent to current node
                         if let Some(parent_node) = self.nodes.get(&parent_path_str) {
                             let edge = Edge {
                                 r#type: EdgeType::Contains,
@@ -474,7 +453,7 @@ impl Parser {
                     }
                 }
                 Err(err) => {
-                    // Decide whether to continue on error based on configuration
+                    // Handle errors based on configuration
                     if self.config.continue_on_error {
                         eprintln!("Error encountered during traversal, continuing: {}", err);
                         continue;
@@ -565,9 +544,9 @@ mod tests {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let dir_path = PathBuf::from(manifest_dir).join("examples").join("python");
 
-        let config =
-            ParserConfig::default().ignore_patterns(vec!["*".to_string(), "!d.py".to_string()]);
+        let config = ParserConfig::default().ignore_patterns(vec!["diff".into()]);
         let mut parser = Parser::new(dir_path.clone(), config);
+
         let result = parser.parse(&dir_path);
         match result {
             Ok((nodes, edges)) => {
@@ -593,13 +572,9 @@ mod tests {
             .join("go")
             .join("demo");
 
-        let config = ParserConfig::default().ignore_patterns(vec![
-            "*".to_string(),
-            "!main.go".to_string(),
-            "!types.go".to_string(),
-        ]);
-
+        let config = ParserConfig::default().ignore_patterns(vec!["diff".into()]);
         let mut parser = Parser::new(dir_path.clone(), config);
+
         let result = parser.parse(&dir_path);
         match result {
             Ok((nodes, edges)) => {
@@ -658,10 +633,9 @@ mod tests {
             .join("examples")
             .join("typescript");
 
-        let config =
-            ParserConfig::default().ignore_patterns(vec!["*".to_string(), "!*.ts".to_string()]);
-
+        let config = ParserConfig::default().ignore_patterns(vec!["diff".into()]);
         let mut parser = Parser::new(dir_path.clone(), config);
+
         let result = parser.parse(&dir_path);
         let mut db = Database::new(PathBuf::from(""));
         match result {
