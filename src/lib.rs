@@ -8,7 +8,7 @@ mod types;
 mod util;
 
 pub use db::Database;
-pub use parser::{FuncParamType, Parser, ParserConfig};
+pub use parser::{File, FuncParamType, Parser, ParserConfig};
 pub use types::{Edge, EdgeType, Language, Node, NodeType};
 
 pub type Config = ParserConfig;
@@ -36,7 +36,7 @@ impl CodeGraph {
         }
     }
 
-    /// Index the given paths into the database.
+    /// Index the given path into the database.
     ///
     /// If `force` is true, the existing files will be re-indexed.
     pub fn index(&mut self, path: PathBuf, force: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -53,7 +53,7 @@ impl CodeGraph {
                 self.db.clean(true)?;
             }
 
-            let (nodes, edges) = parser.parse(&path)?;
+            let (nodes, edges) = parser.parse(&path, None)?;
             let vec_nodes: Vec<Node> = nodes.values().cloned().collect();
             self.db.bulk_insert_nodes_via_csv(&vec_nodes)?;
             self.db.bulk_insert_edges_via_csv(&edges)?;
@@ -67,74 +67,7 @@ impl CodeGraph {
         // Otherwise, we assume that the given path is a single file or a small directory.
         // We use the Kuzu's `MERGE` command to upsert (i.e. insert or update) the nodes.
         if path.is_file() {
-            let rel_file_path = path
-                .strip_prefix(self.repo_path.clone())
-                .unwrap_or(&path)
-                .to_string_lossy()
-                .to_string();
-
-            // find all existing nodes related to the file.
-            let stmt = format!(
-                r#"
-MATCH (file)-[:CONTAINS*1..2]->(def)
-WHERE file.name = "{}"
-RETURN def;
-"#,
-                &rel_file_path,
-            );
-            let old_nodes = self.db.query_nodes(stmt.as_str())?;
-
-            let (nodes, edges) = parser.parse(&path)?;
-
-            // Delete outdated nodes.
-            // Find nodes that exist in old_nodes but not in nodes (outdated nodes to be deleted)
-            let node_names_to_delete: Vec<String> = old_nodes
-                .clone()
-                .into_iter()
-                .filter(|old_node| !nodes.contains_key(&old_node.name))
-                .map(|old_node| old_node.name)
-                .collect();
-            self.db.delete_nodes(&node_names_to_delete)?;
-
-            // Delete all out-going edges from the current file node and old nodes.
-            let mut node_names_for_rel_deletion = vec![rel_file_path.clone()];
-            node_names_for_rel_deletion
-                .extend(old_nodes.clone().into_iter().map(|node| node.name.clone()));
-            // Convert node names to a string array for the query. e.g. ["file1", "node1", "node2"]
-            let node_names_array = format!(
-                "[{}]",
-                node_names_for_rel_deletion
-                    .iter()
-                    .map(|name| format!("{:?}", name))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-
-            let stmt = format!(
-                r#"
-MATCH (a)-[e]->()
-WHERE a.name IN {}
-DELETE e;
-"#,
-                &node_names_array,
-            );
-            log::debug!("delete out-going edges: {}", stmt);
-            let _ = self.db.query(stmt.as_str())?;
-
-            // Upsert the nodes and edges.
-            let vec_nodes: Vec<Node> = nodes.values().cloned().collect();
-            self.db.upsert_nodes(&vec_nodes)?;
-            self.db.upsert_edges(&edges)?;
-
-            let resolved_edges = parser.resolve_pending_edges(Some(&mut self.db))?;
-
-            if log::log_enabled!(log::Level::Debug) {
-                for r in &resolved_edges {
-                    log::debug!("type_rel: {}-[{}]{}", r.from.name, r.r#type, r.to.name);
-                }
-            }
-
-            self.db.upsert_edges(&resolved_edges)?;
+            self.index_file(&mut parser, path, None)?;
         } else if path.is_dir() {
             return Err("Not supported yet".into());
         } else {
@@ -144,6 +77,97 @@ DELETE e;
             )
             .into());
         }
+
+        Ok(())
+    }
+
+    /// Index a dirty file with the given content into the database.
+    ///
+    /// Dirty files are files that have been modified but not yet saved to the disk, so we need to pass the content explicitly.
+    /// Note that the path and content should match the file that is being indexed.
+    pub fn index_dirty_file(
+        &mut self,
+        path: PathBuf,
+        content: &[u8],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut parser = Parser::new(self.repo_path.clone(), self.config.clone());
+        return self.index_file(&mut parser, path, Some(content));
+    }
+
+    fn index_file(
+        &mut self,
+        parser: &mut Parser,
+        path: PathBuf,
+        content: Option<&[u8]>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let rel_file_path = path
+            .strip_prefix(self.repo_path.clone())
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
+
+        // find all existing nodes related to the file.
+        let stmt = format!(
+            r#"
+MATCH (file)-[:CONTAINS*1..2]->(def)
+WHERE file.name = "{}"
+RETURN def;
+"#,
+            &rel_file_path,
+        );
+        let old_nodes = self.db.query_nodes(stmt.as_str())?;
+
+        let (nodes, edges) = parser.parse(&path, content)?;
+
+        // Delete outdated nodes.
+        // Find nodes that exist in old_nodes but not in nodes (outdated nodes to be deleted)
+        let node_names_to_delete: Vec<String> = old_nodes
+            .clone()
+            .into_iter()
+            .filter(|old_node| !nodes.contains_key(&old_node.name))
+            .map(|old_node| old_node.name)
+            .collect();
+        self.db.delete_nodes(&node_names_to_delete)?;
+
+        // Delete all out-going edges from the current file node and old nodes.
+        let mut node_names_for_rel_deletion = vec![rel_file_path.clone()];
+        node_names_for_rel_deletion
+            .extend(old_nodes.clone().into_iter().map(|node| node.name.clone()));
+        // Convert node names to a string array for the query. e.g. ["file1", "node1", "node2"]
+        let node_names_array = format!(
+            "[{}]",
+            node_names_for_rel_deletion
+                .iter()
+                .map(|name| format!("{:?}", name))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+
+        let stmt = format!(
+            r#"
+MATCH (a)-[e]->()
+WHERE a.name IN {}
+DELETE e;
+"#,
+            &node_names_array,
+        );
+        log::debug!("delete out-going edges: {}", stmt);
+        let _ = self.db.query(stmt.as_str())?;
+
+        // Upsert the nodes and edges.
+        let vec_nodes: Vec<Node> = nodes.values().cloned().collect();
+        self.db.upsert_nodes(&vec_nodes)?;
+        self.db.upsert_edges(&edges)?;
+
+        let resolved_edges = parser.resolve_pending_edges(Some(&mut self.db))?;
+
+        if log::log_enabled!(log::Level::Debug) {
+            for r in &resolved_edges {
+                log::debug!("type_rel: {}-[{}]{}", r.from.name, r.r#type, r.to.name);
+            }
+        }
+
+        self.db.upsert_edges(&resolved_edges)?;
 
         Ok(())
     }
@@ -307,6 +331,25 @@ mod tests {
             .try_init();
     }
 
+    fn assert_nodes(graph: &mut CodeGraph, want_node_strings: &[&str]) {
+        let nodes = graph.query_nodes("MATCH (n) RETURN n".to_string()).unwrap();
+        let mut node_strings: Vec<_> = nodes.into_iter().map(|n| n.name).collect();
+        node_strings.sort();
+        assert_eq!(node_strings, want_node_strings);
+    }
+
+    fn assert_edges(graph: &mut CodeGraph, want_edge_strings: &[&str]) {
+        let edges = graph
+            .query_edges("MATCH (a)-[e]->(b) RETURN a.name, b.name, e".to_string())
+            .unwrap();
+        let mut edge_strings: Vec<_> = edges
+            .into_iter()
+            .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
+            .collect();
+        edge_strings.sort();
+        assert_eq!(edge_strings, want_edge_strings);
+    }
+
     #[test]
     fn test_index_go() {
         init();
@@ -348,22 +391,9 @@ mod tests {
         graph.index(repo_path.clone(), true).unwrap();
 
         // 1.2 validate data
-        let final_nodes = graph.query_nodes("MATCH (n) RETURN n".to_string()).unwrap();
-        let final_edges = graph
-            .query_edges("MATCH (a)-[e]->(b) RETURN a.name, b.name, e".to_string())
-            .unwrap();
-        let mut node_strings: Vec<_> = final_nodes.into_iter().map(|n| n.name).collect();
-        let mut edge_strings: Vec<_> = final_edges
-            .into_iter()
-            .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
-            .collect();
-
-        node_strings.sort();
-        edge_strings.sort();
-
-        assert_eq!(
-            node_strings,
-            [
+        assert_nodes(
+            &mut graph,
+            &[
                 ".",
                 "main.go",
                 "main.go:User",
@@ -376,12 +406,12 @@ mod tests {
                 "types.go",
                 "types.go:Address",
                 "types.go:Hobby",
-                "types.go:Status"
+                "types.go:Status",
             ],
         );
-        assert_eq!(
-            edge_strings,
-            [
+        assert_edges(
+            &mut graph,
+            &[
                 ".-[contains]->main.go",
                 ".-[contains]->types.go",
                 "main.go-[contains]->main.go:User",
@@ -396,7 +426,7 @@ mod tests {
                 "main.go:User.SetAddress-[references]->types.go:Hobby",
                 "types.go-[contains]->types.go:Address",
                 "types.go-[contains]->types.go:Hobby",
-                "types.go-[contains]->types.go:Status"
+                "types.go-[contains]->types.go:Status",
             ],
         );
 
@@ -421,22 +451,9 @@ mod tests {
             .unwrap();
 
         // 2.2 validate data
-        let final_nodes = graph.query_nodes("MATCH (n) RETURN n".to_string()).unwrap();
-        let final_edges = graph
-            .query_edges("MATCH (a)-[e]->(b) RETURN a.name, b.name, e".to_string())
-            .unwrap();
-        let mut node_strings: Vec<_> = final_nodes.into_iter().map(|n| n.name).collect();
-        let mut edge_strings: Vec<_> = final_edges
-            .into_iter()
-            .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
-            .collect();
-
-        node_strings.sort();
-        edge_strings.sort();
-
-        assert_eq!(
-            node_strings,
-            [
+        assert_nodes(
+            &mut graph,
+            &[
                 ".",
                 "main.go",
                 "main.go:User",
@@ -449,12 +466,12 @@ mod tests {
                 "types.go",
                 "types.go:Address2",
                 "types.go:Hobby",
-                "types.go:Status"
+                "types.go:Status",
             ],
         );
-        assert_eq!(
-            edge_strings,
-            [
+        assert_edges(
+            &mut graph,
+            &[
                 ".-[contains]->main.go",
                 ".-[contains]->types.go",
                 "main.go-[contains]->main.go:User",
@@ -468,7 +485,7 @@ mod tests {
                 "main.go:User.SetAddress-[references]->types.go:Hobby",
                 "types.go-[contains]->types.go:Address2",
                 "types.go-[contains]->types.go:Hobby",
-                "types.go-[contains]->types.go:Status"
+                "types.go-[contains]->types.go:Status",
             ],
         );
 
@@ -487,6 +504,39 @@ mod tests {
     }
 
     #[test]
+    fn test_index_dirty_file_go() {
+        init();
+
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let repo_path = PathBuf::from(manifest_dir)
+            .join("examples")
+            .join("go")
+            .join("demo");
+        let db_path = repo_path.join("kuzu_db");
+
+        let temp_file_path = repo_path.join("temp.go");
+        let temp_file_content = r#"
+package main
+
+func main() {
+    fmt.Println("Hello, World!")
+}
+        "#;
+
+        let config = Config::default();
+        let mut graph = CodeGraph::new(db_path, repo_path.clone(), config);
+
+        graph.clean(true).unwrap();
+        graph
+            .index_dirty_file(temp_file_path.clone(), temp_file_content.as_bytes())
+            .unwrap();
+
+        assert_nodes(&mut graph, &["temp.go", "temp.go:main"]);
+
+        graph.clean(true).unwrap();
+    }
+
+    #[test]
     fn test_index_typescript() {
         init();
 
@@ -502,22 +552,9 @@ mod tests {
         graph.clean(true).unwrap();
         graph.index(repo_path.clone(), true).unwrap();
 
-        let final_nodes = graph.query_nodes("MATCH (n) RETURN n".to_string()).unwrap();
-        let final_edges = graph
-            .query_edges("MATCH (a)-[e]->(b) RETURN a.name, b.name, e".to_string())
-            .unwrap();
-        let mut node_strings: Vec<_> = final_nodes.into_iter().map(|n| n.name).collect();
-        let mut edge_strings: Vec<_> = final_edges
-            .into_iter()
-            .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
-            .collect();
-
-        node_strings.sort();
-        edge_strings.sort();
-
-        assert_eq!(
-            node_strings,
-            [
+        assert_nodes(
+            &mut graph,
+            &[
                 ".",
                 "main.ts",
                 "main.ts:fetchUserData",
@@ -530,12 +567,12 @@ mod tests {
                 "types.ts:UserService",
                 "types.ts:UserService.constructor",
                 "types.ts:UserService.filterUsers",
-                "types.ts:UserService.getUser"
+                "types.ts:UserService.getUser",
             ],
         );
-        assert_eq!(
-            edge_strings,
-            [
+        assert_edges(
+            &mut graph,
+            &[
                 ".-[contains]->main.ts",
                 ".-[contains]->types.ts",
                 "main.ts-[contains]->main.ts:fetchUserData",
@@ -556,7 +593,7 @@ mod tests {
                 "types.ts:UserService-[contains]->types.ts:UserService.constructor",
                 "types.ts:UserService-[contains]->types.ts:UserService.filterUsers",
                 "types.ts:UserService-[contains]->types.ts:UserService.getUser",
-                "types.ts:UserService.getUser-[references]->types.ts:UserID"
+                "types.ts:UserService.getUser-[references]->types.ts:UserID",
             ],
         );
 
@@ -581,22 +618,9 @@ mod tests {
         graph.index(repo_path.clone(), true).unwrap();
 
         // 1.2 validate data
-        let final_nodes = graph.query_nodes("MATCH (n) RETURN n".to_string()).unwrap();
-        let final_edges = graph
-            .query_edges("MATCH (a)-[e]->(b) RETURN a.name, b.name, e".to_string())
-            .unwrap();
-        let mut node_strings: Vec<_> = final_nodes.into_iter().map(|n| n.name).collect();
-        let mut edge_strings: Vec<_> = final_edges
-            .into_iter()
-            .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
-            .collect();
-
-        node_strings.sort();
-        edge_strings.sort();
-
-        assert_eq!(
-            node_strings,
-            [
+        assert_nodes(
+            &mut graph,
+            &[
                 ".",
                 "main.ts",
                 "main.ts:fetchUserData",
@@ -609,12 +633,12 @@ mod tests {
                 "types.ts:UserService",
                 "types.ts:UserService.constructor",
                 "types.ts:UserService.filterUsers",
-                "types.ts:UserService.getUser"
+                "types.ts:UserService.getUser",
             ],
         );
-        assert_eq!(
-            edge_strings,
-            [
+        assert_edges(
+            &mut graph,
+            &[
                 ".-[contains]->main.ts",
                 ".-[contains]->types.ts",
                 "main.ts-[contains]->main.ts:fetchUserData",
@@ -635,7 +659,7 @@ mod tests {
                 "types.ts:UserService-[contains]->types.ts:UserService.constructor",
                 "types.ts:UserService-[contains]->types.ts:UserService.filterUsers",
                 "types.ts:UserService-[contains]->types.ts:UserService.getUser",
-                "types.ts:UserService.getUser-[references]->types.ts:UserID"
+                "types.ts:UserService.getUser-[references]->types.ts:UserID",
             ],
         );
 
@@ -660,22 +684,9 @@ mod tests {
             .unwrap();
 
         // 2.2 validate data
-        let final_nodes = graph.query_nodes("MATCH (n) RETURN n".to_string()).unwrap();
-        let final_edges = graph
-            .query_edges("MATCH (a)-[e]->(b) RETURN a.name, b.name, e".to_string())
-            .unwrap();
-        let mut node_strings: Vec<_> = final_nodes.into_iter().map(|n| n.name).collect();
-        let mut edge_strings: Vec<_> = final_edges
-            .into_iter()
-            .map(|r| format!("{}-[{}]->{}", r.from.name, r.r#type, r.to.name))
-            .collect();
-
-        node_strings.sort();
-        edge_strings.sort();
-
-        assert_eq!(
-            node_strings,
-            [
+        assert_nodes(
+            &mut graph,
+            &[
                 ".",
                 "main.ts",
                 "main.ts:fetchUserData",
@@ -688,12 +699,12 @@ mod tests {
                 "types.ts:UserService2",
                 "types.ts:UserService2.constructor",
                 "types.ts:UserService2.filterUsers",
-                "types.ts:UserService2.getUser"
+                "types.ts:UserService2.getUser",
             ],
         );
-        assert_eq!(
-            edge_strings,
-            [
+        assert_edges(
+            &mut graph,
+            &[
                 ".-[contains]->main.ts",
                 ".-[contains]->types.ts",
                 "main.ts-[contains]->main.ts:fetchUserData",
@@ -712,7 +723,7 @@ mod tests {
                 "types.ts:UserService2-[contains]->types.ts:UserService2.constructor",
                 "types.ts:UserService2-[contains]->types.ts:UserService2.filterUsers",
                 "types.ts:UserService2-[contains]->types.ts:UserService2.getUser",
-                "types.ts:UserService2.getUser-[references]->types.ts:UserID"
+                "types.ts:UserService2.getUser-[references]->types.ts:UserID",
             ],
         );
 
@@ -728,6 +739,36 @@ mod tests {
         let _ = duct::cmd!("cp", original_file_path, types_go_path.clone())
             .read()
             .unwrap();
+    }
+
+    #[test]
+    fn test_index_dirty_file_typescript() {
+        init();
+
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let repo_path = PathBuf::from(manifest_dir)
+            .join("examples")
+            .join("typescript");
+        let db_path = repo_path.join("kuzu_db");
+
+        let temp_file_path = repo_path.join("temp.ts");
+        let temp_file_content = r#"
+export function greet(name: string): string {
+  console.log(`Hello ${name}!`);
+}
+          "#;
+
+        let config = Config::default();
+        let mut graph = CodeGraph::new(db_path, repo_path.clone(), config);
+
+        graph.clean(true).unwrap();
+        graph
+            .index_dirty_file(temp_file_path.clone(), temp_file_content.as_bytes())
+            .unwrap();
+
+        assert_nodes(&mut graph, &["temp.ts", "temp.ts:greet"]);
+
+        graph.clean(true).unwrap();
     }
 
     #[test]

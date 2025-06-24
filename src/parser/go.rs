@@ -11,8 +11,8 @@ use tree_sitter_go;
 use super::common;
 use crate::util;
 use crate::Database;
-use crate::FuncParamType;
 use crate::{Edge, EdgeType, Language, Node, NodeType};
+use crate::{File, FuncParamType};
 
 /// The tree-sitter definition query source for Go.
 pub const GO_DEFINITIONS_QUERY_SOURCE: &str = include_str!("queries/go-definitions.scm");
@@ -46,7 +46,7 @@ impl Parser {
     pub fn parse(
         &self,
         file_node: &Node,
-        file_path: &PathBuf,
+        file: &File,
     ) -> Result<
         (
             IndexMap<String, Node>,
@@ -60,7 +60,7 @@ impl Parser {
         let mut edges: Vec<Edge> = Vec::new();
         let mut func_param_types: HashMap<String, Vec<FuncParamType>> = HashMap::new();
 
-        let source_code = fs::read(&file_path).expect("Should have been able to read the file");
+        let source_code = file.content;
 
         let mut parser = tree_sitter::Parser::new();
         let language = &tree_sitter_go::LANGUAGE.into();
@@ -68,12 +68,12 @@ impl Parser {
             .set_language(language)
             .expect("Error loading language parser");
 
-        let tree = parser.parse(source_code.clone(), None).unwrap();
+        let tree = parser.parse(source_code, None).unwrap();
         let root_node = tree.root_node();
 
         let mut cursor = tree_sitter::QueryCursor::new();
         let query = tree_sitter::Query::new(language, &query_source).unwrap();
-        let mut matches = cursor.matches(&query, root_node, source_code.as_slice());
+        let mut matches = cursor.matches(&query, root_node, source_code);
 
         while let Some(mat) = matches.next() {
             if let Some(pattern) = QueryPattern::from_repr(mat.pattern_index) {
@@ -154,7 +154,7 @@ impl Parser {
                             &mat,
                             &self.repo_path,
                             file_node,
-                            file_path,
+                            &file.path,
                             &source_code,
                         );
                         if let Some(curr_node) = current_node {
@@ -175,7 +175,7 @@ impl Parser {
                             &mat,
                             &self.repo_path,
                             file_node,
-                            file_path,
+                            &file.path,
                             &source_code,
                         );
                         if let Some(curr_node) = current_node {
@@ -228,9 +228,9 @@ impl Parser {
                                     if let Some(curr_node) = &mut current_node {
                                         curr_node.name = format!(
                                             "{}:{}",
-                                            Path::new(file_path)
+                                            Path::new(&file.path)
                                                 .strip_prefix(&self.repo_path)
-                                                .unwrap_or_else(|_| Path::new(file_path))
+                                                .unwrap_or_else(|_| Path::new(&file.path))
                                                 .to_string_lossy(),
                                             capture_node_text
                                         );
@@ -240,9 +240,9 @@ impl Parser {
                                     // The current function is a struct constructor
                                     let struct_node_name = format!(
                                         "{}:{}",
-                                        Path::new(file_path)
+                                        Path::new(&file.path)
                                             .strip_prefix(&self.repo_path)
-                                            .unwrap_or_else(|_| Path::new(file_path))
+                                            .unwrap_or_else(|_| Path::new(&file.path))
                                             .to_string_lossy(),
                                         capture_node_text,
                                     );
@@ -280,9 +280,9 @@ impl Parser {
                                 let node_name = curr_node.name.rsplit(':').next().unwrap_or("");
                                 curr_node.name = format!(
                                     "{}:{}.{}",
-                                    Path::new(file_path)
+                                    Path::new(&file.path)
                                         .strip_prefix(&self.repo_path)
-                                        .unwrap_or_else(|_| Path::new(file_path))
+                                        .unwrap_or_else(|_| Path::new(&file.path))
                                         .to_string_lossy(),
                                     parent_struct_name.clone(),
                                     node_name
@@ -378,9 +378,9 @@ impl Parser {
                                     if let Some(curr_node) = &mut current_node {
                                         curr_node.name = format!(
                                             "{}:{}",
-                                            Path::new(file_path)
+                                            Path::new(&file.path)
                                                 .strip_prefix(&self.repo_path)
-                                                .unwrap_or_else(|_| Path::new(file_path))
+                                                .unwrap_or_else(|_| Path::new(&file.path))
                                                 .to_string_lossy(),
                                             capture_node_text
                                         );
@@ -390,9 +390,9 @@ impl Parser {
                                     // Try to find the parent struct of the current method.
                                     let struct_node_name = format!(
                                         "{}:{}",
-                                        Path::new(file_path)
+                                        Path::new(&file.path)
                                             .strip_prefix(&self.repo_path)
-                                            .unwrap_or_else(|_| Path::new(file_path))
+                                            .unwrap_or_else(|_| Path::new(&file.path))
                                             .to_string_lossy(),
                                         capture_node_text,
                                     );
@@ -430,9 +430,9 @@ impl Parser {
                                 let node_name = curr_node.name.rsplit(':').next().unwrap_or("");
                                 curr_node.name = format!(
                                     "{}:{}.{}",
-                                    Path::new(file_path)
+                                    Path::new(&file.path)
                                         .strip_prefix(&self.repo_path)
-                                        .unwrap_or_else(|_| Path::new(file_path))
+                                        .unwrap_or_else(|_| Path::new(&file.path))
                                         .to_string_lossy(),
                                     parent_struct_name.clone(),
                                     node_name
@@ -496,7 +496,7 @@ impl Parser {
                             &mat,
                             &self.repo_path,
                             file_node,
-                            file_path,
+                            &file.path,
                             &source_code,
                         );
                         if let Some(curr_node) = current_node {

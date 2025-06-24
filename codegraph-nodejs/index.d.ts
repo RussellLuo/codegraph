@@ -90,6 +90,7 @@ export declare function initLogger(logLevel: LogLevel): void
 export declare class CodeGraph {
   constructor(dbPath: string, repoPath: string, config: Config)
   index(path: string, force: boolean): void
+  indexDirtyFile(path: string, content: string): void
   getFuncParamTypes(filePath: string, line: number): Array<Snippet>
   clean(del: boolean): void
 }

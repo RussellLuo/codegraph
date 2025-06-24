@@ -4,17 +4,15 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
-use std::thread;
-use std::time::Duration;
 use strum_macros;
 use tree_sitter;
 use tree_sitter::StreamingIterator;
-use tree_sitter_go;
 use tree_sitter_python;
 use walkdir::WalkDir;
 
 use crate::util;
 use crate::Database;
+use crate::File;
 use crate::{Edge, EdgeType, Language, Node, NodeType};
 
 /// The tree-sitter definition query source for Python.
@@ -32,13 +30,13 @@ impl Parser {
     pub fn parse(
         &self,
         file_node: &Node,
-        file_path: &PathBuf,
+        file: &File,
     ) -> Result<(IndexMap<String, Node>, Vec<Edge>), Box<dyn std::error::Error>> {
         let query_source = PYTHON_DEFINITIONS_QUERY_SOURCE.to_string();
         let mut nodes: IndexMap<String, Node> = IndexMap::new();
         let mut edges: Vec<Edge> = Vec::new();
 
-        let source_code = fs::read(&file_path).expect("Should have been able to read the file");
+        let source_code = fs::read(&file.path).expect("Should have been able to read the file");
 
         //println!("[SOURCE]\n\n{}\n", String::from_utf8_lossy(&source_code));
         //println!("[QUERY]\n\n{}\n", query_source);
@@ -82,9 +80,9 @@ impl Parser {
                         let node = Node {
                             name: format!(
                                 "{}:{}",
-                                Path::new(file_path)
+                                Path::new(&file.path)
                                     .strip_prefix(&self.repo_path)
-                                    .unwrap_or_else(|_| Path::new(file_path))
+                                    .unwrap_or_else(|_| Path::new(&file.path))
                                     .to_string_lossy(),
                                 class_name
                             ),

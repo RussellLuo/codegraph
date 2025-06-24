@@ -90,6 +90,11 @@ impl ParserConfig {
     }
 }
 
+pub struct File<'a> {
+    path: &'a PathBuf,
+    content: &'a [u8],
+}
+
 #[derive(Debug, Clone)]
 pub struct FuncParamType {
     type_name: String,
@@ -142,15 +147,20 @@ impl Parser {
     pub fn parse(
         &mut self,
         path: &PathBuf,
+        file_content: Option<&[u8]>,
     ) -> Result<(IndexMap<String, Node>, Vec<Edge>), Box<dyn std::error::Error>> {
         if path.is_dir() {
             self.traverse_directory(&path)?;
-        } else if path.is_file() {
+        } else {
+            if file_content.is_none() && !path.is_file() {
+                return Err("Invalid path".into());
+            }
+
             // We are currently parsing a single file.
             self.parsing_file = true;
 
             let (file_node, nodes, edges, pending_imports, func_param_types) =
-                self.parse_file(&path)?;
+                self.parse_file(&path, file_content)?;
 
             let language = file_node.language.clone();
             let file_node_name = file_node.name.clone();
@@ -173,8 +183,6 @@ impl Parser {
                     .or_insert_with(HashMap::new)
                     .extend(func_param_types);
             }
-        } else {
-            return Err("Invalid path".into());
         }
 
         Ok((self.nodes.clone(), self.edges.clone()))
@@ -372,7 +380,7 @@ impl Parser {
                     } else {
                         // Parse file and extract nodes/edges
                         let (file_node, nodes, edges, pending_imports, func_param_types) =
-                            self.parse_file(&entry_path)?;
+                            self.parse_file(&entry_path, None)?;
                         let language = file_node.language.clone();
 
                         // Add parsed nodes to the collection
@@ -476,6 +484,7 @@ impl Parser {
     pub fn parse_file(
         &self,
         file_path: &Path,
+        file_content: Option<&[u8]>,
     ) -> Result<
         (
             Node,
@@ -486,6 +495,16 @@ impl Parser {
         ),
         Box<dyn std::error::Error>,
     > {
+        let final_file_content = if let Some(file_content) = file_content {
+            file_content
+        } else {
+            &fs::read(&file_path).expect("Should have been able to read the file")
+        };
+        let file = File {
+            path: &file_path.to_path_buf(),
+            content: final_file_content,
+        };
+
         let file_language = Language::from_path(file_path.to_path_buf().to_str().unwrap());
         let file_node = Node {
             name: file_path
@@ -503,20 +522,16 @@ impl Parser {
         // Parse the file and add parsed nodes to the collection
         match file_node.language {
             Language::Go => {
-                let (nodes, edges, func_param_types) =
-                    self.go_parser.parse(&file_node, &file_path.to_path_buf())?;
+                let (nodes, edges, func_param_types) = self.go_parser.parse(&file_node, &file)?;
                 return Ok((file_node, nodes, edges, vec![], func_param_types));
             }
             Language::TypeScript => {
-                let (nodes, edges, pending_imports, func_param_types) = self
-                    .typescript_parser
-                    .parse(&file_node, &file_path.to_path_buf())?;
+                let (nodes, edges, pending_imports, func_param_types) =
+                    self.typescript_parser.parse(&file_node, &file)?;
                 return Ok((file_node, nodes, edges, pending_imports, func_param_types));
             }
             Language::Python => {
-                let (nodes, edges) = self
-                    .python_parser
-                    .parse(&file_node, &file_path.to_path_buf())?;
+                let (nodes, edges) = self.python_parser.parse(&file_node, &file)?;
                 return Ok((file_node, nodes, edges, vec![], None));
             }
             Language::Text => {
@@ -547,7 +562,7 @@ mod tests {
         let config = ParserConfig::default().ignore_patterns(vec!["diff".into()]);
         let mut parser = Parser::new(dir_path.clone(), config);
 
-        let result = parser.parse(&dir_path);
+        let result = parser.parse(&dir_path, None);
         match result {
             Ok((nodes, edges)) => {
                 //for node in nodes {
@@ -575,7 +590,7 @@ mod tests {
         let config = ParserConfig::default().ignore_patterns(vec!["diff".into()]);
         let mut parser = Parser::new(dir_path.clone(), config);
 
-        let result = parser.parse(&dir_path);
+        let result = parser.parse(&dir_path, None);
         match result {
             Ok((nodes, edges)) => {
                 let mut node_strings: Vec<_> = nodes.values().cloned().map(|n| n.name).collect();
@@ -636,7 +651,7 @@ mod tests {
         let config = ParserConfig::default().ignore_patterns(vec!["diff".into()]);
         let mut parser = Parser::new(dir_path.clone(), config);
 
-        let result = parser.parse(&dir_path);
+        let result = parser.parse(&dir_path, None);
         let mut db = Database::new(PathBuf::from(""));
         match result {
             Ok((nodes, edges)) => {

@@ -13,8 +13,8 @@ use super::common;
 use super::common::PendingImport;
 use crate::util;
 use crate::Database;
-use crate::FuncParamType;
 use crate::{Edge, EdgeType, Language, Node, NodeType};
+use crate::{File, FuncParamType};
 
 /// The tree-sitter definition query source for TypeScript.
 pub const TYPESCRIPT_DEFINITIONS_QUERY_SOURCE: &str =
@@ -48,7 +48,7 @@ impl Parser {
     pub fn parse(
         &self,
         file_node: &Node,
-        file_path: &PathBuf,
+        file: &File,
     ) -> Result<
         (
             IndexMap<String, Node>,
@@ -66,7 +66,7 @@ impl Parser {
 
         let mut import_name_to_source_path: HashMap<String, String> = HashMap::new(); // Maps import names to their corresponding source paths
 
-        let source_code = fs::read(&file_path).expect("Should have been able to read the file");
+        let source_code = file.content;
 
         let mut parser = tree_sitter::Parser::new();
         let language = &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
@@ -74,12 +74,12 @@ impl Parser {
             .set_language(language)
             .expect("Error loading language parser");
 
-        let tree = parser.parse(source_code.clone(), None).unwrap();
+        let tree = parser.parse(source_code, None).unwrap();
         let root_node = tree.root_node();
 
         let mut cursor = tree_sitter::QueryCursor::new();
         let query = tree_sitter::Query::new(language, &query_source).unwrap();
-        let mut matches = cursor.matches(&query, root_node, source_code.as_slice());
+        let mut matches = cursor.matches(&query, root_node, source_code);
 
         while let Some(mat) = matches.next() {
             if let Some(pattern) = QueryPattern::from_repr(mat.pattern_index) {
@@ -130,7 +130,7 @@ impl Parser {
                                         || capture_node_text.starts_with("../")
                                     {
                                         // Get the absolute path of the imported file.
-                                        let current_file_dir = file_path.parent().unwrap();
+                                        let current_file_dir = file.path.parent().unwrap();
                                         let import_path = Path::new(&capture_node_text);
                                         let mut import_file_path =
                                             current_file_dir.join(import_path);
@@ -188,7 +188,7 @@ impl Parser {
                             &mat,
                             &self.repo_path,
                             file_node,
-                            file_path,
+                            &file.path,
                             &source_code,
                         );
                         if let Some(curr_node) = current_node {
@@ -480,7 +480,7 @@ impl Parser {
                             &mat,
                             &self.repo_path,
                             file_node,
-                            file_path,
+                            &file.path,
                             &source_code,
                         );
                         if let Some(curr_node) = current_node {
@@ -501,7 +501,7 @@ impl Parser {
                             &mat,
                             &self.repo_path,
                             file_node,
-                            file_path,
+                            &file.path,
                             &source_code,
                         );
                         if let Some(curr_node) = current_node {
@@ -553,9 +553,9 @@ impl Parser {
                                           if let Some(curr_node) = &mut current_node {
                                               curr_node.name = format!(
                                                   "{}:{}",
-                                                  Path::new(file_path)
+                                                  Path::new(file.path)
                                                       .strip_prefix(&self.repo_path)
-                                                      .unwrap_or_else(|_| Path::new(file_path))
+                                                      .unwrap_or_else(|_| Path::new(file.path))
                                                       .to_string_lossy(),
                                                   capture_node_text
                                               );
@@ -565,9 +565,9 @@ impl Parser {
                                           // Try to find the parent struct of the current method.
                                           let struct_node_name = format!(
                                               "{}:{}",
-                                              Path::new(file_path)
+                                              Path::new(file.path)
                                                   .strip_prefix(&self.repo_path)
-                                                  .unwrap_or_else(|_| Path::new(file_path))
+                                                  .unwrap_or_else(|_| Path::new(file.path))
                                                   .to_string_lossy(),
                                               capture_node_text,
                                           );
@@ -610,9 +610,9 @@ impl Parser {
                                       let node_name = curr_node.name.rsplit(':').next().unwrap_or("");
                                       curr_node.name = format!(
                                           "{}:{}.{}",
-                                          Path::new(file_path)
+                                          Path::new(file.path)
                                               .strip_prefix(&self.repo_path)
-                                              .unwrap_or_else(|_| Path::new(file_path))
+                                              .unwrap_or_else(|_| Path::new(file.path))
                                               .to_string_lossy(),
                                           parent_struct_name.clone(),
                                           node_name

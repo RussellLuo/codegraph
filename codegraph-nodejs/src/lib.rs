@@ -292,6 +292,17 @@ impl CodeGraph {
     }
 
     #[napi]
+    pub fn index_dirty_file(&mut self, path: String, content: String) -> napi::Result<()> {
+        let result = self
+            .graph
+            .index_dirty_file(PathBuf::from(path.clone()), &content.into_bytes());
+        match result {
+            Ok(_) => Ok(()),
+            Err(e) => Err(napi::Error::from_reason(format!("Indexing failed: {}", e))),
+        }
+    }
+
+    #[napi]
     pub fn get_func_param_types(
         &mut self,
         file_path: String,
