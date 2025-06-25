@@ -1,6 +1,6 @@
 [package]
 name = "codegraph_nodejs"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 
 [lib]
@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
 napi = { version = "2.12.2", default-features = false, features = ["napi4"] }
 napi-derive = "2.12.2"
-codegraph = { version = "0.0.1", path = "../" }
+codegraph = { version = "0.0.2", path = "../" }
 log = "0.4"
 env_logger = "0.11.8"
 
