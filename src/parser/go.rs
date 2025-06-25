@@ -556,6 +556,12 @@ RETURN typ;
             log::trace!("Query Stmt: {:}", stmt);
             let nodes = db.query_nodes(stmt.as_str())?;
 
+            if log::log_enabled!(log::Level::Trace) {
+                for node in &nodes {
+                    log::trace!("Query node: {:?}", node);
+                }
+            }
+
             for node in &nodes {
                 pkgtype_to_node.insert(format!("{}:{}", pkg_name, node.short_name()), node.clone());
             }

@@ -1,4 +1,5 @@
 use glob::Pattern;
+use ignore::overrides::OverrideBuilder;
 use ignore::WalkBuilder;
 use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
@@ -306,11 +307,31 @@ impl Parser {
             builder.max_depth(Some(1));
         }
 
-        // Add custom ignore patterns
-        for pattern in &self.config.ignore_patterns {
-            // FIXME: this seems to not work as expected, need to investigate further.
-            //println!("PATTERN: {pattern}");
-            builder.add_ignore(pattern);
+        // Add custom ignore patterns using overrides
+        if !self.config.ignore_patterns.is_empty() {
+            let mut overrides = OverrideBuilder::new(dir_path);
+
+            for pattern in &self.config.ignore_patterns {
+                // In OverrideBuilder.add(), `!` has the opposite meaning compared to `gitignore`.
+                // See https://docs.rs/ignore/latest/ignore/overrides/struct.OverrideBuilder.html#method.add.
+                //
+                // Therefore, we need to negate the pattern to match gitignore behavior.
+                let ignore_pattern = if pattern.starts_with('!') {
+                    // Remove the `!` prefix if present
+                    &pattern[1..]
+                } else {
+                    // Add the `!` prefix if not present
+                    &format!("!{}", pattern)
+                };
+
+                if let Err(e) = overrides.add(ignore_pattern) {
+                    log::warn!("Unable to add ignore pattern '{}': {}", pattern, e);
+                }
+            }
+
+            if let Ok(overrides) = overrides.build() {
+                builder.overrides(overrides);
+            }
         }
 
         // Build the walker

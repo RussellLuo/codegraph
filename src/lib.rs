@@ -361,14 +361,56 @@ mod tests {
             .join("demo");
         let db_path = dir_path.join("kuzu_db");
 
-        let config = Config::default().ignore_patterns(vec!["diff".into()]);
+        let config = Config::default().ignore_patterns(vec![
+            "*".into(),
+            "!types.go".into(),
+            "!main.go".into(),
+        ]);
         let mut graph = CodeGraph::new(db_path, dir_path.clone(), config);
 
         graph.clean(true).unwrap();
         graph.index(dir_path, false).unwrap();
 
-        let existing_nodes = graph.query_nodes("MATCH (n) RETURN n".to_string()).unwrap();
-        assert_eq!(existing_nodes.len(), 11);
+        // validate data
+        assert_nodes(
+            &mut graph,
+            &[
+                ".",
+                "main.go",
+                "main.go:User",
+                "main.go:User.ChangeStatus",
+                "main.go:User.DisplayInfo",
+                "main.go:User.NewUser",
+                "main.go:User.SetAddress",
+                "main.go:User.UpdateEmail",
+                "main.go:main",
+                "types.go",
+                "types.go:Address",
+                "types.go:Hobby",
+                "types.go:Status",
+            ],
+        );
+        assert_edges(
+            &mut graph,
+            &[
+                ".-[contains]->main.go",
+                ".-[contains]->types.go",
+                "main.go-[contains]->main.go:User",
+                "main.go-[contains]->main.go:main",
+                "main.go:User-[contains]->main.go:User.ChangeStatus",
+                "main.go:User-[contains]->main.go:User.DisplayInfo",
+                "main.go:User-[contains]->main.go:User.NewUser",
+                "main.go:User-[contains]->main.go:User.SetAddress",
+                "main.go:User-[contains]->main.go:User.UpdateEmail",
+                "main.go:User.ChangeStatus-[references]->types.go:Status",
+                "main.go:User.SetAddress-[references]->types.go:Address",
+                "main.go:User.SetAddress-[references]->types.go:Hobby",
+                "types.go-[contains]->types.go:Address",
+                "types.go-[contains]->types.go:Hobby",
+                "types.go-[contains]->types.go:Status",
+            ],
+        );
+
         graph.clean(true).unwrap();
     }
 
@@ -383,7 +425,11 @@ mod tests {
             .join("demo");
         let db_path = repo_path.join("kuzu_db");
 
-        let config = Config::default().ignore_patterns(vec!["diff".into()]);
+        let config = Config::default().ignore_patterns(vec![
+            "*".into(),
+            "!types.go".into(),
+            "!main.go".into(),
+        ]);
         let mut graph = CodeGraph::new(db_path, repo_path.clone(), config);
 
         // 1.1 initial index
@@ -546,7 +592,11 @@ func main() {
             .join("typescript");
         let db_path = repo_path.join("kuzu_db");
 
-        let config = Config::default().ignore_patterns(vec!["diff".into()]);
+        let config = Config::default().ignore_patterns(vec![
+            "*".into(),
+            "!types.ts".into(),
+            "!main.ts".into(),
+        ]);
         let mut graph = CodeGraph::new(db_path, repo_path.clone(), config);
 
         graph.clean(true).unwrap();
@@ -610,7 +660,11 @@ func main() {
             .join("typescript");
         let db_path = repo_path.join("kuzu_db");
 
-        let config = Config::default().ignore_patterns(vec!["diff".into()]);
+        let config = Config::default().ignore_patterns(vec![
+            "*".into(),
+            "!types.ts".into(),
+            "!main.ts".into(),
+        ]);
         let mut graph = CodeGraph::new(db_path, repo_path.clone(), config);
 
         // 1.1 initial index
@@ -780,7 +834,11 @@ export function greet(name: string): string {
             .join("demo");
         let db_path = dir_path.join("kuzu_db");
 
-        let config = Config::default().ignore_patterns(vec!["diff".into()]);
+        let config = Config::default().ignore_patterns(vec![
+            "*".into(),
+            "!types.go".into(),
+            "!main.go".into(),
+        ]);
         let mut graph = CodeGraph::new(db_path, dir_path.clone(), config);
         graph.index(dir_path, false).unwrap();
 
