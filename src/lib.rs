@@ -550,39 +550,6 @@ mod tests {
     }
 
     #[test]
-    fn test_index_dirty_file_go() {
-        init();
-
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let repo_path = PathBuf::from(manifest_dir)
-            .join("examples")
-            .join("go")
-            .join("demo");
-        let db_path = repo_path.join("kuzu_db");
-
-        let temp_file_path = repo_path.join("temp.go");
-        let temp_file_content = r#"
-package main
-
-func main() {
-    fmt.Println("Hello, World!")
-}
-        "#;
-
-        let config = Config::default();
-        let mut graph = CodeGraph::new(db_path, repo_path.clone(), config);
-
-        graph.clean(true).unwrap();
-        graph
-            .index_dirty_file(temp_file_path.clone(), temp_file_content.as_bytes())
-            .unwrap();
-
-        assert_nodes(&mut graph, &["temp.go", "temp.go:main"]);
-
-        graph.clean(true).unwrap();
-    }
-
-    #[test]
     fn test_index_typescript() {
         init();
 
@@ -796,6 +763,39 @@ func main() {
     }
 
     #[test]
+    fn test_index_dirty_file_go() {
+        init();
+
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let repo_path = PathBuf::from(manifest_dir)
+            .join("examples")
+            .join("go")
+            .join("demo");
+        let db_path = repo_path.join("kuzu_db");
+
+        let temp_file_path = repo_path.join("temp.go");
+        let temp_file_content = r#"
+package main
+
+func main() {
+    fmt.Println("Hello, World!")
+}
+        "#;
+
+        let config = Config::default();
+        let mut graph = CodeGraph::new(db_path, repo_path.clone(), config);
+
+        graph.clean(true).unwrap();
+        graph
+            .index_dirty_file(temp_file_path.clone(), temp_file_content.as_bytes())
+            .unwrap();
+
+        assert_nodes(&mut graph, &["temp.go", "temp.go:main"]);
+
+        graph.clean(true).unwrap();
+    }
+
+    #[test]
     fn test_index_dirty_file_typescript() {
         init();
 
@@ -826,7 +826,9 @@ export function greet(name: string): string {
     }
 
     #[test]
-    fn test_get_func_param_types() {
+    fn test_get_func_param_types_go() {
+        init();
+
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let dir_path = PathBuf::from(manifest_dir)
             .join("examples")
@@ -840,20 +842,89 @@ export function greet(name: string): string {
             "!main.go".into(),
         ]);
         let mut graph = CodeGraph::new(db_path, dir_path.clone(), config);
+
+        graph.clean(true).unwrap();
         graph.index(dir_path, false).unwrap();
 
         let file_path = "main.go".to_string();
         let line = 37; // SetAddress()
-        let result = graph.get_func_param_types(file_path, line);
-        match result {
-            Ok(snippets) => {
-                for s in snippets {
-                    println!("Snippet: {:?}", s);
-                }
-            }
-            Err(e) => {
-                println!("Failed to query: {:?}", e);
-            }
-        }
+        let snippets = graph.get_func_param_types(file_path, line).unwrap();
+        let mut snippet_strings: Vec<_> = snippets
+            .into_iter()
+            .map(|s| {
+                format!(
+                    "-->{}:{}:{}\n{}",
+                    s.path, s.start_line, s.end_line, s.content
+                )
+            })
+            .collect();
+        snippet_strings.sort();
+        assert_eq!(
+            snippet_strings,
+            &[
+                r#"-->types.go:3:6
+Address struct {
+		Country string
+		City    string
+	}"#,
+                r#"-->types.go:8:11
+Hobby struct {
+		Sports bool
+		Music  bool
+	}"#,
+            ],
+        );
+
+        graph.clean(true).unwrap();
+    }
+
+    #[test]
+    fn test_get_func_param_types_typescript() {
+        init();
+
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let dir_path = PathBuf::from(manifest_dir)
+            .join("examples")
+            .join("typescript");
+        let db_path = dir_path.join("kuzu_db");
+
+        let config = Config::default().ignore_patterns(vec![
+            "*".into(),
+            "!types.ts".into(),
+            "!main.ts".into(),
+        ]);
+        let mut graph = CodeGraph::new(db_path, dir_path.clone(), config);
+
+        graph.clean(true).unwrap();
+        graph.index(dir_path, false).unwrap();
+
+        let file_path = "main.ts".to_string();
+        let line = 25; // fetchUserData()
+        let snippets = graph.get_func_param_types(file_path, line).unwrap();
+        let mut snippet_strings: Vec<_> = snippets
+            .into_iter()
+            .map(|s| {
+                format!(
+                    "-->{}:{}:{}\n{}",
+                    s.path, s.start_line, s.end_line, s.content
+                )
+            })
+            .collect();
+        snippet_strings.sort();
+        assert_eq!(
+            snippet_strings,
+            &[
+                r#"-->types.ts:22:22
+type UserID = string | number;"#,
+                r#"-->types.ts:26:48
+class UserService {
+  public static filterUsers<T extends User>(users: T[], predicate: (user: T) => boolean): T[] { ... }
+  public async getUser(userID: UserID): Promise<User[]> { ... }
+  constructor(baseUrl: string) { ... }
+}"#,
+            ],
+        );
+
+        graph.clean(true).unwrap();
     }
 }
